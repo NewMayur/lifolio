@@ -20,7 +20,7 @@ const AppStorage = {
 };
 
 // --- CONSTANTS ---
-const INITIAL_WALLET_BALANCE = 500;
+const INITIAL_WALLET_BALANCE = 200;
 const CURRENCY = "₹";
 
 // --- CONTEXT ---

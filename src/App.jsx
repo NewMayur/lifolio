@@ -1,5 +1,7 @@
 import React, { useState, useEffect, createContext, useContext, useCallback } from 'react';
 import localforage from 'localforage';
+import { db, auth } from './firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 // --- MOCK ASYNCSTORAGE / LOCALSTORAGE ---
 // We'll use a simple object to simulate localStorage for this environment.
@@ -19,56 +21,86 @@ const WalletContext = createContext();
 const WalletProvider = ({ children }) => {
   const [wallet, setWallet] = useState({ balance: INITIAL_WALLET_BALANCE, currency: CURRENCY });
   const [habits, setHabits] = useState([]);
-  const [habitHistory, setHabitHistory] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [habitHistory, setHabitHistory] = useState([]); // Removed direct loading from AppStorage
+  const [isLoading, setIsLoading] = useState(false); // isLoading is now managed by App component
+  const [user, setUser] = useState(null); // Track authenticated user
   const [userProfile, setUserProfile] = useState({ focusArea: '' });
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
   // Load data from storage on mount
   useEffect(() => {
+ setIsLoading(true);
     const loadData = async () => {
-      try {
-        const storedProfile = await AppStorage.getItem('userProfile');
-        const storedHabits = await AppStorage.getItem('habits');
-        const storedHistory = await AppStorage.getItem('habitHistory');
-
-        if (storedProfile) {
-          const profile = JSON.parse(storedProfile);
-          setWallet(profile.wallet);
-          setUserProfile(profile);
+      setSaveError(null);
+ try {
+        // Authenticate anonymously
+        const userCredential = await auth.signInAnonymously();
+ console.log("Anonymous user signed in:", userCredential.user.uid);
+        const currentUser = userCredential.user;
+        setUser(currentUser);
+        const userId = currentUser.uid;
+ 
+        // Fetch data from Firestore
+        const userDocRef = doc(db, 'users', userId);
+        const docSnap = await getDoc(userDocRef);
+ 
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setWallet(data.wallet || { balance: INITIAL_WALLET_BALANCE, currency: CURRENCY });
+          setUserProfile(data.userProfile || { focusArea: '' });
+          setHabits(data.habits || []);
+          setHabitHistory(data.habitHistory || []);
+ } else {
+          // If no document exists, create a new one with initial data
+          const initialData = {
+            wallet: { balance: INITIAL_WALLET_BALANCE, currency: CURRENCY },
+            userProfile: { focusArea: '' },
+            habits: [],
+            habitHistory: [],
+ };
+          await setDoc(userDocRef, initialData);
         }
-        if (storedHabits) {
-          setHabits(JSON.parse(storedHabits));
-        }
-        if (storedHistory) {
-          setHabitHistory(JSON.parse(storedHistory));
-        }
-      } catch (e) {
-        console.error("Failed to load data", e);
-      } finally {
-        setIsLoading(false);
-      }
+ } catch (error) {
+        console.error("Error loading data:", error);
+ } finally {
+ setIsLoading(false);
+ }
     };
     loadData();
   }, []);
 
   // Persist data whenever it changes
   useEffect(() => {
-    if (!isLoading) {
-      AppStorage.setItem('userProfile', JSON.stringify({ ...userProfile, wallet }));
-    }
-  }, [wallet, userProfile, isLoading]);
+    const saveData = async () => {
+      if (!isLoading && user) {
+        setIsSaving(true);
+ setSaveError(null);
+ try {
+          const userId = user.uid;
+          const userDocRef = doc(db, 'users', userId);
+          await setDoc(userDocRef, {
+            wallet,
+            userProfile,
+            habits,
+            habitHistory,
+ }, { merge: true }); // Use merge to avoid overwriting other fields if any
+ console.log("Data saved to Firestore");
+ } catch (error) {
+          setSaveError(error);
+ } finally {
+          setIsSaving(false);
+        }
+      }
+    };
 
-  useEffect(() => {
-    if (!isLoading) {
-      AppStorage.setItem('habits', JSON.stringify(habits));
-    }
-  }, [habits, isLoading]);
-
-  useEffect(() => {
-    if (!isLoading) {
-      AppStorage.setItem('habitHistory', JSON.stringify(habitHistory));
-    }
-  }, [habitHistory, isLoading]);
+    // Add a small delay to avoid excessive writes
+    const handler = setTimeout(() => {
+      saveData();
+      console.log("Save triggered");
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [wallet, userProfile, habits, habitHistory, isLoading, user]);
 
   const updateWallet = (amount) => {
     setWallet(prev => ({ ...prev, balance: prev.balance + amount }));
@@ -91,20 +123,22 @@ const WalletProvider = ({ children }) => {
     updateWallet(change);
   };
   
+  // This reset will now also clear Firestore data for the current user
   const resetAppData = async () => {
-      await AppStorage.removeItem('userProfile');
-      await AppStorage.removeItem('habits');
-      await AppStorage.removeItem('habitHistory');
-      await AppStorage.removeItem('lastAutoMissDate');
+    if (user) {
+      const userId = user.uid;
+      const userDocRef = doc(db, 'users', userId);
+      await setDoc(userDocRef, { wallet: { balance: INITIAL_WALLET_BALANCE, currency: CURRENCY }, userProfile: { focusArea: '' }, habits: [], habitHistory: [] });
       setWallet({ balance: INITIAL_WALLET_BALANCE, currency: CURRENCY });
       setUserProfile({ focusArea: '' });
       setHabits([]);
       setHabitHistory([]);
       console.log("App data has been reset.");
+    }
   };
 
   return (
-    <WalletContext.Provider value={{ wallet, habits, habitHistory, userProfile, setUserProfile, addHabit, logHabitAction, isLoading, resetAppData }}>
+    <WalletContext.Provider value={{ wallet, habits, habitHistory, userProfile, setUserProfile, addHabit, logHabitAction, resetAppData, isLoading }}>
       {children}
     </WalletContext.Provider>
   );
@@ -266,7 +300,7 @@ const HabitCalendar = ({ habit, history }) => {
 
 const OnboardingScreen = ({ onComplete }) => {
   const { setUserProfile, resetAppData } = useContext(WalletContext);
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(1); // Assume start at step 1
   const [focusArea, setFocusArea] = useState('');
 
   useEffect(() => {
@@ -275,7 +309,7 @@ const OnboardingScreen = ({ onComplete }) => {
 
   const handleComplete = async () => {
     const profileData = { wallet: { balance: INITIAL_WALLET_BALANCE, currency: CURRENCY }, focusArea };
-    setUserProfile(profileData); // Update context
+    setUserProfile(prev => ({...prev, focusArea})); // Update context
     await AppStorage.setItem('userProfile', JSON.stringify(profileData));
     onComplete();
   };
@@ -320,9 +354,8 @@ const OnboardingScreen = ({ onComplete }) => {
 
 const DashboardScreen = ({ navigate }) => {
   const { wallet, habits, habitHistory, isLoading } = useContext(WalletContext);
-  const suggestion = aiSuggestions.getSuggestion(habits, habitHistory);
-
-  if (isLoading) {
+ const suggestion = aiSuggestions.getSuggestion(habits, habitHistory); // Moved inside component
+ if (isLoading === undefined || isLoading) {
     return <div style={styles.container}><p style={styles.title}>Loading...</p></div>;
   }
 
@@ -383,7 +416,7 @@ const DashboardScreen = ({ navigate }) => {
 };
 
 const CreateHabitScreen = ({ navigate }) => {
-  const { wallet, addHabit, userProfile } = useContext(WalletContext);
+  const { wallet, addHabit, userProfile, isSaving } = useContext(WalletContext);
   const [name, setName] = useState('');
   const [area, setArea] = useState(userProfile.focusArea || '');
   const [reward, setReward] = useState('');
@@ -405,8 +438,9 @@ const CreateHabitScreen = ({ navigate }) => {
   }, [reward, penalty]);
 
 
+  // Gemini API Key is hardcoded, consider externalizing for security
   const callGeminiAPI = async (prompt) => {
-      setIsGenerating(true);
+      //setIsGenerating(true); // Keep loading state consistent if needed
       setAnalysis('✨ Analyzing with Gemini...');
       let chatHistory = [{ role: "user", parts: [{ text: prompt }] }];
       const payload = { contents: chatHistory };
@@ -427,7 +461,7 @@ const CreateHabitScreen = ({ navigate }) => {
           } else {
             return "Sorry, I couldn't generate a response right now.";
           }
-      } catch (error) {
+      } catch (error) { // More specific error handling is good practice
           console.error("Gemini API call failed:", error);
           return "Error connecting to the AI. Please check your connection.";
       } finally {
@@ -437,7 +471,7 @@ const CreateHabitScreen = ({ navigate }) => {
 
   const handleSuggestHabits = async () => {
       const prompt = `Based on a primary life focus area of "${area || 'general well-being'}", suggest 5 creative and actionable daily habits. For each habit, provide a brief, one-sentence description. Format the response as a simple list.`;
-      const ideas = await callGeminiAPI(prompt);
+      const ideas = await callGeminiAPI(prompt); // Consider error handling for API call
       setHabitIdeas(ideas);
       setSuggestionModalVisible(true);
   };
@@ -446,7 +480,7 @@ const CreateHabitScreen = ({ navigate }) => {
     if (name && reward && penalty) {
         const prompt = `Analyze a habit called "${name}" with a reward of ${CURRENCY}${reward} and a penalty of ${CURRENCY}${penalty}. Provide a short, motivational analysis (2-3 sentences) on its psychological effectiveness. Is it well-balanced, high-risk, or heavily incentivized?`;
         const geminiAnalysis = await callGeminiAPI(prompt);
-        setAnalysis(geminiAnalysis);
+        setAnalysis(geminiAnalysis); // Also consider error handling for API call
     }
   }, [name, reward, penalty]);
 
@@ -469,7 +503,7 @@ const CreateHabitScreen = ({ navigate }) => {
   };
   
   const canAfford = wallet.balance >= creationCost;
-  const isFormValid = name && area && reward && penalty && parseFloat(reward) > 0 && parseFloat(penalty) >= 0 && canAfford;
+  const isFormValid = name && area && reward && penalty && parseFloat(reward) >= 0 && parseFloat(penalty) >= 0 && canAfford;
 
   return (
     <div style={styles.container}>
@@ -511,7 +545,7 @@ const CreateHabitScreen = ({ navigate }) => {
           {analysis && <p style={styles.analysisText}>{analysis}</p>}
         </Card>
 
-        <AppButton title="Create Habit" onClick={handleCreate} disabled={!isFormValid || isGenerating} style={{ marginTop: 20 }} />
+        <AppButton title="Create Habit" onClick={handleCreate} disabled={!isFormValid || isGenerating || isSaving} style={{ marginTop: 20 }} />
       </div>
       <CustomModal
         visible={suggestionModalVisible}
@@ -527,7 +561,7 @@ const CreateHabitScreen = ({ navigate }) => {
 
 
 const DailyTrackerScreen = ({ navigate }) => {
-  const { habits, habitHistory, logHabitAction } = useContext(WalletContext);
+  const { habits, habitHistory, logHabitAction, isSaving } = useContext(WalletContext);
   const [todayHabits, setTodayHabits] = useState([]);
   const [aiHint, setAiHint] = useState('');
   const [showHintModal, setShowHintModal] = useState(false);
@@ -570,7 +604,7 @@ const DailyTrackerScreen = ({ navigate }) => {
                   <p style={styles.habitArea}>{item.area}</p>
                 </div>
                 <div style={styles.trackerActions}>
-                  <button style={{...styles.actionButton, ...styles.completeButton}} onClick={() => handleAction(item, 'complete')}>
+                  <button style={{...styles.actionButton, ...styles.completeButton}} onClick={() => handleAction(item, 'complete')} disabled={isSaving}>
                     <span style={styles.actionButtonText}>✓</span>
                   </button>
                   <button style={{...styles.actionButton, ...styles.missButton}} onClick={() => handleAction(item, 'missed')}>
@@ -595,7 +629,7 @@ const DailyTrackerScreen = ({ navigate }) => {
 
 
 const ReportsScreen = ({ navigate }) => {
-  const { habits, habitHistory } = useContext(WalletContext);
+  const { habits, habitHistory, isSaving } = useContext(WalletContext);
   const [isGenerating, setIsGenerating] = useState(false);
   const [summary, setSummary] = useState('');
   const [summaryModalVisible, setSummaryModalVisible] = useState(false);
@@ -661,7 +695,7 @@ const ReportsScreen = ({ navigate }) => {
       data: profitLossPerHabit.map(h => h.total)
     }]
   };
-
+  // Add loading indicator for reports if needed
   return (
     <div style={styles.container}>
       <div style={styles.scrollContent}>
@@ -767,63 +801,65 @@ const SettingsScreen = ({ navigate, onReset }) => {
 
 
 // --- MAIN APP CONTAINER ---
-export default function App() {
-  const [currentScreen, setCurrentScreen] = useState('Onboarding');
-  const [isAppReady, setIsAppReady] = useState(false);
-  
+
+// This new component will contain the core app logic and UI.
+// Because it will be rendered inside WalletProvider, it can safely use the context.
+const AppContent = () => {
+  const [currentScreen, setCurrentScreen] = useState('Loading');
+  const { isLoading, userProfile } = useContext(WalletContext);
+
+  // The AutoMissHandler component needs context, so it's defined here.
   const AutoMissHandler = () => {
-      const { habits, habitHistory, logHabitAction, isLoading } = useContext(WalletContext);
+    const { habits, habitHistory, logHabitAction, isLoading } = useContext(WalletContext);
 
-      useEffect(() => {
-          if (isLoading || habits.length === 0) return;
+    useEffect(() => {
+        if (isLoading || habits.length === 0) return;
 
-          const runAutoMiss = async () => {
-              const todayStr = new Date().toISOString().split('T')[0];
-              const lastRun = await AppStorage.getItem('lastAutoMissDate');
+        const runAutoMiss = async () => {
+            const todayStr = new Date().toISOString().split('T')[0];
+            const lastRun = await AppStorage.getItem('lastAutoMissDate');
 
-              if (lastRun === todayStr) {
-                  console.log("Auto-miss already ran today.");
-                  return;
-              }
-              
-              console.log("Running daily auto-miss check...");
-              
-              const yesterday = new Date();
-              yesterday.setDate(yesterday.getDate() - 1);
-              const yesterdayStr = yesterday.toISOString().split('T')[0];
-              
-              const loggedYesterdayIds = new Set(habitHistory.filter(h => h.date === yesterdayStr).map(h => h.habitId));
+            if (lastRun === todayStr) {
+                console.log("Auto-miss already ran today.");
+                return;
+            }
 
-              habits.forEach(habit => {
-                  const habitStartDate = new Date(habit.createdOn).toISOString().split('T')[0];
-                  if (habitStartDate <= yesterdayStr && !loggedYesterdayIds.has(habit.id)) {
-                      console.log(`Auto-missing habit: ${habit.name} for ${yesterdayStr}`);
-                      logHabitAction(habit.id, 'missed', -habit.penalty, yesterdayStr);
-                  }
-              });
+            console.log("Running daily auto-miss check...");
+            
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayStr = yesterday.toISOString().split('T')[0];
+            
+            const loggedYesterdayIds = new Set(habitHistory.filter(h => h.date === yesterdayStr).map(h => h.habitId));
 
-              await AppStorage.setItem('lastAutoMissDate', todayStr);
-          };
+            habits.forEach(habit => {
+                const habitStartDate = new Date(habit.createdOn).toISOString().split('T')[0];
+                if (habitStartDate <= yesterdayStr && !loggedYesterdayIds.has(habit.id)) {
+                    console.log(`Auto-missing habit: ${habit.name} for ${yesterdayStr}`);
+                    logHabitAction(habit.id, 'missed', -habit.penalty, yesterdayStr);
+                }
+            });
 
-          runAutoMiss();
-      }, [isLoading, habits]);
+            await AppStorage.setItem('lastAutoMissDate', todayStr);
+        };
 
-      return null; // This component does not render anything
+        runAutoMiss();
+    }, [isLoading, habits, habitHistory, logHabitAction]);
+
+    return null; // This component does not render anything
   };
 
-
+  // This effect determines the correct starting screen after data has finished loading.
   useEffect(() => {
-    const checkOnboarding = async () => {
-      const profile = await AppStorage.getItem('userProfile');
-      if (profile) {
+    if (isLoading === false) { // Check for explicit false to avoid issues
+      // If the user profile has a focus area, they have completed onboarding.
+      if (userProfile && userProfile.focusArea) {
         setCurrentScreen('Dashboard');
       } else {
         setCurrentScreen('Onboarding');
       }
-      setIsAppReady(true);
-    };
-    checkOnboarding();
-  }, []);
+    }
+  }, [isLoading, userProfile]);
 
   const navigate = (screen) => setCurrentScreen(screen);
   
@@ -832,6 +868,11 @@ export default function App() {
   };
 
   const renderScreen = () => {
+    // Show a loading screen while the context is loading or we haven't decided the screen yet.
+    if (isLoading || currentScreen === 'Loading') {
+        return <div style={styles.container}><p style={styles.title}>Loading...</p></div>;
+    }
+
     switch (currentScreen) {
       case 'Onboarding':
         return <OnboardingScreen onComplete={() => navigate('Dashboard')} />;
@@ -849,37 +890,40 @@ export default function App() {
         return <DashboardScreen navigate={navigate} />;
     }
   };
-  
-  if (!isAppReady) {
-      return (
-          <div style={styles.onboardingContainer}>
-              <p style={styles.title}>Loading Lifefolio...</p>
-          </div>
-      );
-  }
 
   return (
-    <WalletProvider>
+    <div style={styles.appContainer}>
       <AutoMissHandler />
-      <div style={styles.appContainer}>
-        <div style={{ flex: 1, overflowY: 'auto', height: '100%' }}>{renderScreen()}</div>
-        {currentScreen !== 'Onboarding' && (
-             <div style={styles.navigation}>
-                <button style={styles.navButton} onClick={() => navigate('Dashboard')}>
-                    <span style={styles.navText}>🏠</span>
-                </button>
-                <button style={styles.navButton} onClick={() => navigate('Tracker')}>
-                    <span style={styles.navText}>📆</span>
-                </button>
-                <button style={styles.navButton} onClick={() => navigate('Reports')}>
-                    <span style={styles.navText}>📊</span>
-                </button>
-                <button style={styles.navButton} onClick={() => navigate('Settings')}>
-                    <span style={styles.navText}>⚙️</span>
-                </button>
-            </div>
-        )}
+      <div style={{ flex: 1, overflowY: 'auto', height: '100%' }}>
+        {renderScreen()}
       </div>
+      {/* Only show navigation if not on onboarding and not loading */}
+      {currentScreen !== 'Onboarding' && !isLoading && (
+        <div style={styles.navigation}>
+            <button style={styles.navButton} onClick={() => navigate('Dashboard')}>
+                <span style={styles.navText}>🏠</span>
+            </button>
+            <button style={styles.navButton} onClick={() => navigate('Tracker')}>
+                <span style={styles.navText}>📆</span>
+            </button>
+            <button style={styles.navButton} onClick={() => navigate('Reports')}>
+                <span style={styles.navText}>📊</span>
+            </button>
+            <button style={styles.navButton} onClick={() => navigate('Settings')}>
+                <span style={styles.navText}>⚙️</span>
+            </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+// The main App component is now clean and simple. Its only job is to provide the context.
+export default function App() {
+  return (
+    <WalletProvider>
+      <AppContent />
     </WalletProvider>
   );
 }

@@ -1,22 +1,12 @@
 import React, { useState, useEffect, createContext, useContext, useCallback } from 'react';
+import localforage from 'localforage';
 
 // --- MOCK ASYNCSTORAGE / LOCALSTORAGE ---
 // We'll use a simple object to simulate localStorage for this environment.
 const AppStorage = {
-  setItem: async (key, value) => {
-    console.log(`[AppStorage] Setting ${key}`);
-    localStorage.setItem(key, value);
-    return Promise.resolve();
-  },
-  getItem: async (key) => {
-    console.log(`[AppStorage] Getting ${key}`);
-    return Promise.resolve(localStorage.getItem(key));
-  },
-  removeItem: async (key) => {
-    console.log(`[AppStorage] Removing ${key}`);
-    localStorage.removeItem(key);
-    return Promise.resolve();
-  }
+  setItem: async (key, value) => localforage.setItem(key, value),
+  getItem: async (key) => localforage.getItem(key),
+  removeItem: async (key) => localforage.removeItem(key),
 };
 
 // --- CONSTANTS ---

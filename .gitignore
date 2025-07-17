@@ -15,3 +15,5 @@ firebase-debug.log
 
 # Local configuration files
 *.local
+package-lock.json
+package.json

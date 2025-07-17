@@ -2,26 +2,19 @@ import React, { useState, useEffect, createContext, useContext, useCallback } fr
 
 // --- MOCK ASYNCSTORAGE / LOCALSTORAGE ---
 // We'll use a simple object to simulate localStorage for this environment.
-const mockStorage = {
-  userProfile: null,
-  habits: null,
-  habitHistory: null,
-  lastAutoMissDate: null,
-};
-
 const AppStorage = {
   setItem: async (key, value) => {
-    console.log(`[AppStorage MOCK] Setting ${key}`);
-    mockStorage[key] = value;
+    console.log(`[AppStorage] Setting ${key}`);
+    localStorage.setItem(key, value);
     return Promise.resolve();
   },
   getItem: async (key) => {
-    console.log(`[AppStorage MOCK] Getting ${key}`);
-    return Promise.resolve(mockStorage[key]);
+    console.log(`[AppStorage] Getting ${key}`);
+    return Promise.resolve(localStorage.getItem(key));
   },
   removeItem: async (key) => {
-    console.log(`[AppStorage MOCK] Removing ${key}`);
-    mockStorage[key] = null;
+    console.log(`[AppStorage] Removing ${key}`);
+    localStorage.removeItem(key);
     return Promise.resolve();
   }
 };
@@ -117,10 +110,6 @@ const WalletProvider = ({ children }) => {
       setUserProfile({ focusArea: '' });
       setHabits([]);
       setHabitHistory([]);
-      mockStorage.userProfile = null;
-      mockStorage.habits = null;
-      mockStorage.habitHistory = null;
-      mockStorage.lastAutoMissDate = null;
       console.log("App data has been reset.");
   };
 

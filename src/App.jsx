@@ -2,6 +2,9 @@ import React, { useState, useEffect, createContext, useContext, useCallback } fr
 import localforage from 'localforage';
 import { db, auth } from './firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import styles from './styles.js';
+import LoginScreen from './LoginScreen';
+import { onAuthStateChanged } from 'firebase/auth';
 
 // --- MOCK ASYNCSTORAGE / LOCALSTORAGE ---
 // We'll use a simple object to simulate localStorage for this environment.
@@ -28,120 +31,118 @@ const WalletProvider = ({ children }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
-  // Load data from storage on mount
-  useEffect(() => {
- setIsLoading(true);
-    const loadData = async () => {
-      setSaveError(null);
- try {
-        // Authenticate anonymously
-        const userCredential = await auth.signInAnonymously();
- console.log("Anonymous user signed in:", userCredential.user.uid);
-        const currentUser = userCredential.user;
-        setUser(currentUser);
-        const userId = currentUser.uid;
- 
-        // Fetch data from Firestore
-        const userDocRef = doc(db, 'users', userId);
-        const docSnap = await getDoc(userDocRef);
- 
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setWallet(data.wallet || { balance: INITIAL_WALLET_BALANCE, currency: CURRENCY });
-          setUserProfile(data.userProfile || { focusArea: '' });
-          setHabits(data.habits || []);
-          setHabitHistory(data.habitHistory || []);
- } else {
-          // If no document exists, create a new one with initial data
-          const initialData = {
-            wallet: { balance: INITIAL_WALLET_BALANCE, currency: CURRENCY },
-            userProfile: { focusArea: '' },
-            habits: [],
-            habitHistory: [],
- };
-          await setDoc(userDocRef, initialData);
-        }
- } catch (error) {
-        console.error("Error loading data:", error);
- } finally {
- setIsLoading(false);
- }
-    };
-    loadData();
-  }, []);
-
-  // Persist data whenever it changes
-  useEffect(() => {
-    const saveData = async () => {
-      if (!isLoading && user) {
-        setIsSaving(true);
- setSaveError(null);
- try {
-          const userId = user.uid;
-          const userDocRef = doc(db, 'users', userId);
-          await setDoc(userDocRef, {
-            wallet,
-            userProfile,
-            habits,
-            habitHistory,
- }, { merge: true }); // Use merge to avoid overwriting other fields if any
- console.log("Data saved to Firestore");
- } catch (error) {
-          setSaveError(error);
- } finally {
-          setIsSaving(false);
-        }
-      }
-    };
-
-    // Add a small delay to avoid excessive writes
-    const handler = setTimeout(() => {
-      saveData();
-      console.log("Save triggered");
-    }, 500);
-    return () => clearTimeout(handler);
-  }, [wallet, userProfile, habits, habitHistory, isLoading, user]);
-
-  const updateWallet = (amount) => {
-    setWallet(prev => ({ ...prev, balance: prev.balance + amount }));
-  };
-
-  const addHabit = (habit, cost) => {
-    const newHabits = [...habits, habit];
-    setHabits(newHabits);
-    updateWallet(-cost);
-  };
-
-  const logHabitAction = (habitId, status, change, date) => {
-    const newLog = {
-      habitId,
-      date: date,
-      status,
-      change,
-    };
-    setHabitHistory(prev => [...prev, newLog]);
-    updateWallet(change);
-  };
-  
-  // This reset will now also clear Firestore data for the current user
-  const resetAppData = async () => {
-    if (user) {
-      const userId = user.uid;
+// This new useEffect listens for real-time authentication changes
+useEffect(() => {
+  const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    setIsLoading(true);
+    if (currentUser) {
+      setUser(currentUser);
+      const userId = currentUser.uid;
       const userDocRef = doc(db, 'users', userId);
-      await setDoc(userDocRef, { wallet: { balance: INITIAL_WALLET_BALANCE, currency: CURRENCY }, userProfile: { focusArea: '' }, habits: [], habitHistory: [] });
+      const docSnap = await getDoc(userDocRef);
+
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setWallet(data.wallet || { balance: INITIAL_WALLET_BALANCE, currency: CURRENCY });
+        setUserProfile(data.userProfile || { focusArea: '' });
+        setHabits(data.habits || []);
+        setHabitHistory(data.habitHistory || []);
+      } else {
+        const initialData = {
+          wallet: { balance: INITIAL_WALLET_BALANCE, currency: CURRENCY },
+          userProfile: { focusArea: '' },
+          habits: [],
+          habitHistory: [],
+        };
+        await setDoc(userDocRef, initialData);
+        setWallet(initialData.wallet);
+        setUserProfile(initialData.userProfile);
+        setHabits(initialData.habits);
+        setHabitHistory(initialData.habitHistory);
+      }
+    } else {
+      setUser(null);
       setWallet({ balance: INITIAL_WALLET_BALANCE, currency: CURRENCY });
       setUserProfile({ focusArea: '' });
       setHabits([]);
       setHabitHistory([]);
-      console.log("App data has been reset.");
     }
+    setIsLoading(false);
+  });
+  return () => unsubscribe();
+}, []); // Empty dependency array ensures this runs only once on mount
+
+  // Persist data whenever it changes
+  useEffect(() => {
+    if (isLoading || !user) return; // Don't save if loading or logged out
+
+    const saveData = async () => {
+      setIsSaving(true);
+      setSaveError(null);
+      try {
+        const userId = user.uid;
+        const userDocRef = doc(db, 'users', userId);
+        await setDoc(userDocRef, {
+          wallet,
+          userProfile,
+          habits,
+          habitHistory,
+        }, { merge: true });
+      } catch (error) {
+        setSaveError(error);
+      } finally {
+        setIsSaving(false);
+      }
+    };
+
+    const handler = setTimeout(saveData, 500);
+    return () => clearTimeout(handler);
+  }, [wallet, userProfile, habits, habitHistory, user, isLoading]);
+
+  const updateWallet = (amount) => {
+    setWallet(prev => ({ ...prev, balance: prev.balance + amount }));
+  };
+
+  const addHabit = (habit, cost) => {
+    const newHabits = [...habits, habit];
+    setHabits(newHabits);
+    updateWallet(-cost);
+  };
+
+  const logHabitAction = (habitId, status, change, date) => {
+    const newLog = { habitId, date, status, change };
+    setHabitHistory(prev => [...prev, newLog]);
+    updateWallet(change);
+  };
+  
+  const resetAppData = async () => {
+    if (user) {
+      const initialData = {
+        wallet: { balance: INITIAL_WALLET_BALANCE, currency: CURRENCY },
+        userProfile: { focusArea: '' },
+        habits: [],
+        habitHistory: [],
+      };
+      const userDocRef = doc(db, 'users', user.uid);
+      await setDoc(userDocRef, initialData);
+      setWallet(initialData.wallet);
+      setUserProfile(initialData.userProfile);
+      setHabits(initialData.habits);
+      setHabitHistory(initialData.habitHistory);
+    }
+  };
+
+  // All the values the rest of the app needs
+  const contextValue = { 
+    wallet, habits, habitHistory, userProfile, setUserProfile, 
+    addHabit, logHabitAction, resetAppData, isLoading, user, isSaving, saveError
   };
 
-  return (
-    <WalletContext.Provider value={{ wallet, habits, habitHistory, userProfile, setUserProfile, addHabit, logHabitAction, resetAppData, isLoading }}>
-      {children}
-    </WalletContext.Provider>
-  );
+  return (
+    <WalletContext.Provider value={contextValue}>
+      {children}
+    </WalletContext.Provider>
+  );
 };
 
 // --- AI SUGGESTIONS SERVICE ---
@@ -302,10 +303,6 @@ const OnboardingScreen = ({ onComplete }) => {
   const { setUserProfile, resetAppData } = useContext(WalletContext);
   const [step, setStep] = useState(1); // Assume start at step 1
   const [focusArea, setFocusArea] = useState('');
-
-  useEffect(() => {
-    resetAppData();
-  }, []);
 
   const handleComplete = async () => {
     const profileData = { wallet: { balance: INITIAL_WALLET_BALANCE, currency: CURRENCY }, focusArea };
@@ -799,80 +796,77 @@ const SettingsScreen = ({ navigate, onReset }) => {
     );
 };
 
-
 // --- MAIN APP CONTAINER ---
 
-// This new component will contain the core app logic and UI.
-// Because it will be rendered inside WalletProvider, it can safely use the context.
 const AppContent = () => {
+  // State for tracking the current screen (e.g., 'Dashboard', 'Onboarding')
   const [currentScreen, setCurrentScreen] = useState('Loading');
-  const { isLoading, userProfile } = useContext(WalletContext);
+  
+  // Get all necessary values from our context
+  const { isLoading, userProfile, user, habits, habitHistory, logHabitAction } = useContext(WalletContext);
 
-  // The AutoMissHandler component needs context, so it's defined here.
+  // The AutoMissHandler component checks for missed habits daily.
+  // It's defined here because it needs access to the context.
   const AutoMissHandler = () => {
-    const { habits, habitHistory, logHabitAction, isLoading } = useContext(WalletContext);
-
     useEffect(() => {
         if (isLoading || habits.length === 0) return;
-
         const runAutoMiss = async () => {
             const todayStr = new Date().toISOString().split('T')[0];
             const lastRun = await AppStorage.getItem('lastAutoMissDate');
+            if (lastRun === todayStr) return;
 
-            if (lastRun === todayStr) {
-                console.log("Auto-miss already ran today.");
-                return;
-            }
-
-            console.log("Running daily auto-miss check...");
-            
             const yesterday = new Date();
             yesterday.setDate(yesterday.getDate() - 1);
             const yesterdayStr = yesterday.toISOString().split('T')[0];
-            
             const loggedYesterdayIds = new Set(habitHistory.filter(h => h.date === yesterdayStr).map(h => h.habitId));
 
             habits.forEach(habit => {
                 const habitStartDate = new Date(habit.createdOn).toISOString().split('T')[0];
                 if (habitStartDate <= yesterdayStr && !loggedYesterdayIds.has(habit.id)) {
-                    console.log(`Auto-missing habit: ${habit.name} for ${yesterdayStr}`);
                     logHabitAction(habit.id, 'missed', -habit.penalty, yesterdayStr);
                 }
             });
-
             await AppStorage.setItem('lastAutoMissDate', todayStr);
         };
-
         runAutoMiss();
-    }, [isLoading, habits, habitHistory, logHabitAction]);
-
-    return null; // This component does not render anything
+    }, [isLoading, habits, habitHistory, logHabitAction]); // Dependencies are correct
+    return null; // This component doesn't render anything
   };
 
-  // This effect determines the correct starting screen after data has finished loading.
+  // This useEffect is responsible for deciding which screen to show after login.
   useEffect(() => {
-    if (isLoading === false) { // Check for explicit false to avoid issues
-      // If the user profile has a focus area, they have completed onboarding.
+    // Only run this logic if loading is complete and we have a logged-in user.
+    if (!isLoading && user) {
       if (userProfile && userProfile.focusArea) {
+        // If the user has a focus area, they've completed onboarding.
         setCurrentScreen('Dashboard');
       } else {
+        // Otherwise, send them to onboarding.
         setCurrentScreen('Onboarding');
       }
     }
-  }, [isLoading, userProfile]);
+  }, [user, isLoading, userProfile]); // This effect runs whenever these values change.
 
+  // Helper functions for navigation within the app.
   const navigate = (screen) => setCurrentScreen(screen);
-  
   const handleReset = () => {
     setCurrentScreen('Onboarding');
   };
 
-  const renderScreen = () => {
-    // Show a loading screen while the context is loading or we haven't decided the screen yet.
-    if (isLoading || currentScreen === 'Loading') {
-        return <div style={styles.container}><p style={styles.title}>Loading...</p></div>;
-    }
+  // --- Main Render Logic ---
 
+  // 1. Show a loading screen while Firebase is initializing.
+  if (isLoading) {
+    return <div style={styles.container}><p style={styles.title}>Loading...</p></div>;
+  }
+  
+  // 2. If loading is done and there's no user, show the Login screen.
+  if (!user) {
+    return <LoginScreen />;
+  }
+
+  // 3. If we have a user, render the correct screen from the main app.
+  const renderMainApp = () => {
     switch (currentScreen) {
       case 'Onboarding':
         return <OnboardingScreen onComplete={() => navigate('Dashboard')} />;
@@ -887,7 +881,8 @@ const AppContent = () => {
       case 'Settings':
         return <SettingsScreen navigate={navigate} onReset={handleReset} />;
       default:
-        return <DashboardScreen navigate={navigate} />;
+        // A fallback loading screen while currentScreen is being set.
+        return <div style={styles.container}><p style={styles.title}>Loading screen...</p></div>;
     }
   };
 
@@ -895,10 +890,10 @@ const AppContent = () => {
     <div style={styles.appContainer}>
       <AutoMissHandler />
       <div style={{ flex: 1, overflowY: 'auto', height: '100%' }}>
-        {renderScreen()}
+        {renderMainApp()}
       </div>
-      {/* Only show navigation if not on onboarding and not loading */}
-      {currentScreen !== 'Onboarding' && !isLoading && (
+      {/* Navigation bar, visible only on the main app screens */}
+      {(currentScreen !== 'Onboarding' && currentScreen !== 'Loading') && (
         <div style={styles.navigation}>
             <button style={styles.navButton} onClick={() => navigate('Dashboard')}>
                 <span style={styles.navText}>🏠</span>
@@ -919,7 +914,7 @@ const AppContent = () => {
 };
 
 
-// The main App component is now clean and simple. Its only job is to provide the context.
+// The final export statement for the App component.
 export default function App() {
   return (
     <WalletProvider>
@@ -927,440 +922,3 @@ export default function App() {
     </WalletProvider>
   );
 }
-
-// --- STYLES (Web Version using JS Objects) ---
-const styles = {
-  appContainer: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100vh',
-    maxHeight: '100vh',
-    backgroundColor: '#1c1917',
-    fontFamily: 'sans-serif',
-  },
-  container: {
-    flex: 1,
-    backgroundColor: '#1c1917',
-    paddingTop: 40,
-    boxSizing: 'border-box',
-    overflowY: 'auto',
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 100,
-  },
-  headerTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#f0f9ff',
-    marginBottom: 10,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#e5e7eb',
-    marginBottom: 10,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#a1a1aa',
-    marginBottom: 20,
-  },
-  button: {
-    backgroundColor: '#2563eb',
-    padding: '15px 0',
-    borderRadius: 12,
-    textAlign: 'center',
-    border: 'none',
-    cursor: 'pointer',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.25)',
-    transition: 'background-color 0.2s',
-  },
-  disabledButton: {
-      backgroundColor: '#4b5563',
-      cursor: 'not-allowed',
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-    margin: 0,
-  },
-  smallButton: {
-    padding: '8px 12px',
-  },
-  smallButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  card: {
-    backgroundColor: '#262626',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    border: '1px solid #404040',
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#d4d4d8',
-    marginBottom: 15,
-  },
-  input: {
-    backgroundColor: '#1c1917',
-    color: '#e5e7eb',
-    padding: 15,
-    borderRadius: 10,
-    fontSize: 16,
-    marginBottom: 15,
-    border: '1px solid #52525b',
-    width: 'calc(100% - 32px)',
-  },
-  label: {
-    fontSize: 16,
-    color: '#a1a1aa',
-    marginBottom: 8,
-  },
-  onboardingContainer: {
-      flex: 1,
-      paddingTop: 40,
-      backgroundImage: 'linear-gradient(to bottom, #1e3a8a, #1c1917)',
-      color: 'white',
-      textAlign: 'center'
-  },
-  onboardingTitle: {
-    fontSize: 40,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  onboardingSubtitle: {
-    fontSize: 18,
-    color: '#dbeafe',
-    textAlign: 'center',
-    marginBottom: 40,
-  },
-  onboardingText: {
-    fontSize: 16,
-    color: '#d4d4d8',
-    marginBottom: 10,
-    lineHeight: 1.5,
-    textAlign: 'left',
-  },
-  walletCard: {
-    borderRadius: 20,
-    padding: 25,
-    marginBottom: 20,
-    textAlign: 'center',
-    backgroundImage: 'linear-gradient(to bottom, #3b82f6, #1d4ed8)',
-  },
-  walletLabel: {
-    fontSize: 18,
-    color: '#dbeafe',
-  },
-  walletBalance: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  suggestionCard: {
-    backgroundColor: '#1e3a8a',
-    borderColor: '#3b82f6',
-  },
-  suggestionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#dbeafe',
-    marginBottom: 5,
-  },
-  suggestionMessage: {
-    fontSize: 16,
-    color: '#bfdbfe',
-  },
-  sectionHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 10,
-    marginBottom: 10,
-  },
-  emptyText: {
-    textAlign: 'center',
-    color: '#a1a1aa',
-    fontSize: 16,
-    marginTop: 20,
-    padding: 20,
-  },
-  habitItem: {
-    display: 'flex',
-    alignItems: 'center',
-    padding: 15,
-  },
-  habitTrend: {
-      fontSize: 24,
-      marginRight: 15,
-  },
-  habitName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#e5e7eb',
-  },
-  habitArea: {
-      fontSize: 14,
-      color: '#a1a1aa',
-  },
-  habitReward: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#4ade80',
-  },
-  habitPenalty: {
-    fontSize: 14,
-    color: '#f87171',
-  },
-  analysisText: {
-      marginTop: 15,
-      fontSize: 14,
-      color: '#93c5fd',
-      fontStyle: 'italic',
-      textAlign: 'center',
-      whiteSpace: 'pre-wrap',
-      lineHeight: 1.6,
-      backgroundColor: 'rgba(23, 37, 84, 0.5)',
-      padding: '10px',
-      borderRadius: '8px',
-  },
-  costContainer: {
-    backgroundColor: 'rgba(23, 37, 84, 0.5)',
-    padding: '10px',
-    borderRadius: '8px',
-    textAlign: 'center',
-    marginTop: 10,
-    marginBottom: 5,
-  },
-  costLabel: {
-    color: '#dbeafe',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  costSublabel: {
-    color: '#93c5fd',
-    fontSize: 12,
-  },
-  errorText: {
-    color: '#fca5a5',
-    textAlign: 'center',
-    fontSize: 14,
-    marginTop: 10,
-  },
-  trackerItem: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  trackerActions: {
-    display: 'flex',
-  },
-  actionButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    margin: '0 10px',
-    border: 'none',
-    cursor: 'pointer',
-  },
-  actionButtonText: {
-    fontSize: 24,
-    color: '#1c1917',
-    fontWeight: 'bold',
-  },
-  completeButton: {
-    backgroundColor: '#4ade80',
-  },
-  missButton: {
-    backgroundColor: '#f87171',
-  },
-  summaryContainer: {
-      display: 'flex',
-      justifyContent: 'space-around',
-  },
-  summaryBox: {
-      textAlign: 'center',
-  },
-  summaryLabel: {
-      fontSize: 16,
-      color: '#a1a1aa',
-  },
-  summaryValue: {
-      fontSize: 24,
-      fontWeight: 'bold',
-      marginTop: 5,
-  },
-  settingDescription: {
-      fontSize: 14,
-      color: '#a1a1aa',
-      marginTop: 10,
-      lineHeight: 1.4,
-  },
-  navigation: {
-    display: 'flex',
-    height: 65,
-    backgroundColor: '#262626',
-    borderTop: '1px solid #404040',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    flexShrink: 0,
-  },
-  navButton: {
-    flex: 1,
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-  },
-  navText: {
-    fontSize: 28,
-  },
-  modalOverlay: {
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      backgroundColor: 'rgba(0, 0, 0, 0.7)',
-      zIndex: 1000,
-  },
-  modalContainer: {
-      width: '90%',
-      maxWidth: 500,
-      backgroundColor: '#262626',
-      borderRadius: 16,
-      padding: 20,
-      border: '1px solid #404040'
-  },
-  modalHeader: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 15,
-  },
-  modalTitle: {
-      fontSize: 20,
-      fontWeight: 'bold',
-      color: '#e5e7eb',
-  },
-  modalCloseButton: {
-      fontSize: 18,
-      color: '#a1a1aa',
-      fontWeight: 'bold',
-      background: 'none',
-      border: 'none',
-      cursor: 'pointer',
-  },
-  modalText: {
-      fontSize: 16,
-      color: '#d4d4d8',
-      lineHeight: 1.5,
-  },
-  // Chart Styles
-  pieChart: {
-      width: 150,
-      height: 150,
-      borderRadius: '50%',
-      border: '1px solid #404040',
-  },
-  legendContainer: {
-      marginTop: 20,
-      display: 'flex',
-      flexWrap: 'wrap',
-      justifyContent: 'center',
-  },
-  legendItem: {
-      display: 'flex',
-      alignItems: 'center',
-      margin: '0 10px 5px',
-  },
-  legendColorBox: {
-      width: 14,
-      height: 14,
-      marginRight: 8,
-      borderRadius: 3,
-  },
-  legendText: {
-      color: '#d4d4d8',
-      fontSize: 14,
-  },
-  barChartContainer: {
-      display: 'flex',
-      justifyContent: 'space-around',
-      alignItems: 'flex-end',
-      height: 200,
-      borderLeft: '1px solid #52525b',
-      borderBottom: '1px solid #52525b',
-      padding: '10px 0',
-  },
-  barWrapper: {
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      height: '100%',
-      justifyContent: 'flex-end',
-      flex: 1,
-  },
-  bar: {
-      width: '50%',
-      borderRadius: '4px 4px 0 0',
-  },
-  barLabel: {
-      color: '#a1a1aa',
-      fontSize: 12,
-      marginTop: 5,
-  },
-  // Calendar Styles
-  calendarGrid: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(7, 1fr)',
-      gap: '5px',
-  },
-  calendarHeader: {
-      textAlign: 'center',
-      fontWeight: 'bold',
-      color: '#a1a1aa',
-      fontSize: 14,
-  },
-  calendarDay: {
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      height: 35,
-      borderRadius: 6,
-      backgroundColor: '#404040',
-      color: '#a1a1aa',
-  },
-  calendarDayComplete: {
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      height: 35,
-      borderRadius: 6,
-      backgroundColor: '#22c55e',
-      color: '#14532d',
-      fontWeight: 'bold',
-  },
-  calendarDayMissed: {
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      height: 35,
-      borderRadius: 6,
-      backgroundColor: '#ef4444',
-      color: '#7f1d1d',
-      fontWeight: 'bold',
-  }
-};

@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
-import { getAuth, signInAnonymously } from "firebase/auth";
+import { getAuth, browserLocalPersistence } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCCnwiFhSiTVnoqmIUWBglzYZ1rkhHUcQs",
@@ -20,15 +20,21 @@ const db = getFirestore(app);
 // Initialize Auth
 const auth = getAuth(app);
 
-// Sign in anonymously
-signInAnonymously(auth)
-  .then(() => {
-    console.log("Anonymous user signed in");
-  })
-  .catch((error) => {
-    const errorCode = error.code;
-    const errorMessage = error.message;
-    console.error("Anonymous sign-in failed:", errorCode, errorMessage);
-  });
+// auth.setPersistence(browserLocalPersistence)
+//   .then(() => {
+//     // Sign in anonymously after setting persistence
+//     signInAnonymously(auth)
+//       .then(() => {
+//         console.log("Anonymous user signed in");
+//       })
+//       .catch((error) => {
+//         const errorCode = error.code;
+//         const errorMessage = error.message;
+//         console.error("Anonymous sign-in failed:", errorCode, errorMessage);
+//       });
+//   })
+//   .catch((error) => {
+//     console.error("Failed to set authentication persistence:", error);
+//   });
 
 export { db, auth };

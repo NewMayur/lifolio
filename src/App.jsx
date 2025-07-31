@@ -779,6 +779,60 @@ const SettingsScreen = ({ navigate, onReset }) => {
                         Invest in yourself, intelligently.
                     </p>
                 </Card>
+                <Card>
+                    <p style={styles.cardTitle}>Developer Options</p>
+                    <AppButton
+                        title="Run Auto Miss"
+                        onClick={() => {
+                            const userId = auth.currentUser.uid;
+                            const userDocRef = doc(db, 'users', userId);
+                            getDoc(userDocRef).then(docSnap => {
+                                const userData = docSnap.data();
+                                // Get the last auto miss date from firebase
+                                const lastAutoMissDate = userData.lastAutoMissDate ? userData.lastAutoMissDate.toDate() : null;
+
+                                // Get the current date in Indian timezone
+                                const now = new Date();
+                                const indianTimeZone = 'Asia/Kolkata';
+                                const indianTime = new Intl.DateTimeFormat('en-IN', { timeZone: indianTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+                                const [month, day, year] = indianTime.split('/');
+                                const todayInIndianTime = `${year}-${month}-${day}`;
+
+                                if (lastAutoMissDate) {
+                                    const lastAutoMissDateInIndianTime = new Intl.DateTimeFormat('en-IN', { timeZone: indianTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(lastAutoMissDate);
+                                    const [lastMonth, lastDay, lastYear] = lastAutoMissDateInIndianTime.split('/');
+                                    const lastAutoMissDateStr = `${lastYear}-${lastMonth}-${lastDay}`;
+
+                                    if (lastAutoMissDateStr === todayInIndianTime) {
+                                        alert("Auto miss already run today");
+                                        return;
+                                    }
+                                }
+
+                                // Get yesterday's date in Indian timezone
+                                const yesterday = new Date(now);
+                                yesterday.setDate(yesterday.getDate() - 1);
+                                const yesterdayInIndianTime = new Intl.DateTimeFormat('en-IN', { timeZone: indianTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(yesterday);
+                                const [yesterdayMonth, yesterdayDay, yesterdayYear] = yesterdayInIndianTime.split('/');
+                                const yesterdayStr = `${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}`;
+
+                                const loggedYesterdayIds = new Set(habitHistory.filter(h => h.date === yesterdayStr).map(h => h.habitId));
+
+                                habits.forEach(habit => {
+                                    const habitStartDate = new Date(habit.createdOn).toISOString().split('T')[0];
+                                    if (habitStartDate <= yesterdayStr && !loggedYesterdayIds.has(habit.id)) {
+                                        logHabitAction(habit.id, 'missed', -habit.penalty, yesterdayStr);
+                                    }
+                                });
+
+                                // Update the last auto miss date in firebase
+                                setDoc(userDocRef, { lastAutoMissDate: now }, { merge: true });
+                                alert("Auto miss run successfully");
+                            });
+                        }}
+                        style={{ backgroundColor: '#ef4444' }}
+                    />
+                </Card>
 
             </div>
             <CustomModal
@@ -809,27 +863,55 @@ const AppContent = () => {
   // It's defined here because it needs access to the context.
   const AutoMissHandler = () => {
     useEffect(() => {
-        if (isLoading || habits.length === 0) return;
-        const runAutoMiss = async () => {
-            const todayStr = new Date().toISOString().split('T')[0];
-            const lastRun = await AppStorage.getItem('lastAutoMissDate');
-            if (lastRun === todayStr) return;
+        if (isLoading || habits.length === 0 || !user) return;
 
-            const yesterday = new Date();
+        const runAutoMiss = async () => {
+            const userId = user.uid;
+            const userDocRef = doc(db, 'users', userId);
+            const docSnap = await getDoc(userDocRef);
+            const userData = docSnap.data();
+
+            // Get the last auto miss date from firebase
+            const lastAutoMissDate = userData.lastAutoMissDate ? userData.lastAutoMissDate.toDate() : null;
+
+            // Get the current date in Indian timezone
+            const now = new Date();
+            const indianTimeZone = 'Asia/Kolkata';
+
+            // Get yesterday's date in Indian timezone
+            const yesterday = new Date(now);
             yesterday.setDate(yesterday.getDate() - 1);
-            const yesterdayStr = yesterday.toISOString().split('T')[0];
-            const loggedYesterdayIds = new Set(habitHistory.filter(h => h.date === yesterdayStr).map(h => h.habitId));
+            const yesterdayInIndianTime = new Intl.DateTimeFormat('en-IN', { timeZone: indianTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(yesterday);
+            const [yesterdayMonth, yesterdayDay, yesterdayYear] = yesterdayInIndianTime.split('/');
+            const yesterdayStr = `${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}`;
 
             habits.forEach(habit => {
-                const habitStartDate = new Date(habit.createdOn).toISOString().split('T')[0];
-                if (habitStartDate <= yesterdayStr && !loggedYesterdayIds.has(habit.id)) {
-                    logHabitAction(habit.id, 'missed', -habit.penalty, yesterdayStr);
+                const habitStartDate = new Date(habit.createdOn);
+                const habitStartDateInIndianTime = new Intl.DateTimeFormat('en-IN', { timeZone: indianTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(habitStartDate);
+                const [startMonth, startDay, startYear] = habitStartDateInIndianTime.split('/');
+                let currentDate = new Date(`${startYear}-${startMonth}-${startDay}`);
+
+                while (currentDate <= yesterday) {
+                    const currentDateInIndianTime = new Intl.DateTimeFormat('en-IN', { timeZone: indianTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(currentDate);
+                    const [currentMonth, currentDay, currentYear] = currentDateInIndianTime.split('/');
+                    const currentDateStr = `${currentYear}-${currentMonth}-${currentDay}`;
+
+                    const loggedForCurrentDate = habitHistory.some(h => h.habitId === habit.id && h.date === currentDateStr);
+
+                    if (!loggedForCurrentDate) {
+                        logHabitAction(habit.id, 'missed', -habit.penalty, currentDateStr);
+                    }
+
+                    currentDate.setDate(currentDate.getDate() + 1);
                 }
             });
-            await AppStorage.setItem('lastAutoMissDate', todayStr);
+
+            // Update the last auto miss date in firebase
+            await setDoc(userDocRef, { lastAutoMissDate: now }, { merge: true });
         };
+
         runAutoMiss();
-    }, [isLoading, habits, habitHistory, logHabitAction]); // Dependencies are correct
+    }, [isLoading, habits, habitHistory, logHabitAction, user]);
     return null; // This component doesn't render anything
   };
 

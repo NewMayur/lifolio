@@ -28,6 +28,7 @@ const WalletProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(false); // isLoading is now managed by App component
   const [user, setUser] = useState(null); // Track authenticated user
   const [userProfile, setUserProfile] = useState({ focusArea: '' });
+  const [apiKey, setApiKey] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
@@ -45,18 +46,21 @@ useEffect(() => {
         const data = docSnap.data();
         setWallet(data.wallet || { balance: INITIAL_WALLET_BALANCE, currency: CURRENCY });
         setUserProfile(data.userProfile || { focusArea: '' });
+        setApiKey(data.apiKey || '');
         setHabits(data.habits || []);
         setHabitHistory(data.habitHistory || []);
       } else {
         const initialData = {
           wallet: { balance: INITIAL_WALLET_BALANCE, currency: CURRENCY },
           userProfile: { focusArea: '' },
+          apiKey: '',
           habits: [],
           habitHistory: [],
         };
         await setDoc(userDocRef, initialData);
         setWallet(initialData.wallet);
         setUserProfile(initialData.userProfile);
+        setApiKey(initialData.apiKey);
         setHabits(initialData.habits);
         setHabitHistory(initialData.habitHistory);
       }
@@ -85,6 +89,7 @@ useEffect(() => {
         await setDoc(userDocRef, {
           wallet,
           userProfile,
+          apiKey,
           habits,
           habitHistory,
         }, { merge: true });
@@ -97,7 +102,7 @@ useEffect(() => {
 
     const handler = setTimeout(saveData, 500);
     return () => clearTimeout(handler);
-  }, [wallet, userProfile, habits, habitHistory, user, isLoading]);
+  }, [wallet, userProfile, apiKey, habits, habitHistory, user, isLoading]);
 
   const updateWallet = (amount) => {
     setWallet(prev => ({ ...prev, balance: prev.balance + amount }));
@@ -132,10 +137,19 @@ useEffect(() => {
     }
   };
 
+  const updateHabit = (id, updatedHabit) => {
+    setHabits(prev => prev.map(h => h.id === id ? { ...h, ...updatedHabit } : h));
+  };
+
+  const deleteHabit = (id) => {
+    setHabits(prev => prev.filter(h => h.id !== id));
+    setHabitHistory(prev => prev.filter(h => h.habitId !== id));
+  };
+
   // All the values the rest of the app needs
-  const contextValue = { 
-    wallet, habits, habitHistory, userProfile, setUserProfile, 
-    addHabit, logHabitAction, resetAppData, isLoading, user, isSaving, saveError
+  const contextValue = {
+    wallet, habits, habitHistory, userProfile, setUserProfile, apiKey, setApiKey,
+    addHabit, updateHabit, deleteHabit, logHabitAction, resetAppData, isLoading, user, isSaving, saveError
   };
 
   return (
@@ -181,6 +195,9 @@ const aiSuggestions = {
     return { title: "Stay Focused", message: "Consistency is key. Keep logging your habits daily to see progress." };
   }
 };
+
+// --- UTILS ---
+const cleanText = (text) => text.replace(/\*/g, '').replace(/\n\d+\.\s*/g, '\n• ').replace(/^- /gm, '• ');
 
 // --- REUSABLE UI COMPONENTS (Web Version) ---
 const AppButton = ({ onClick, title, style, textStyle, disabled = false }) => (
@@ -350,11 +367,159 @@ const OnboardingScreen = ({ onComplete }) => {
 
 
 const DashboardScreen = ({ navigate }) => {
-  const { wallet, habits, habitHistory, isLoading } = useContext(WalletContext);
- const suggestion = aiSuggestions.getSuggestion(habits, habitHistory); // Moved inside component
- if (isLoading === undefined || isLoading) {
+  const { wallet, habits, habitHistory, apiKey, isLoading } = useContext(WalletContext);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [summary, setSummary] = useState('');
+  const [summaryModalVisible, setSummaryModalVisible] = useState(false);
+
+  if (isLoading === undefined || isLoading) {
     return <div style={styles.container}><p style={styles.title}>Loading...</p></div>;
   }
+
+  // Overall performance from reports
+  const earningsData = habitHistory.reduce((acc, h) => {
+    if (h.change > 0) acc.earnings += h.change;
+    else acc.losses += Math.abs(h.change);
+    return acc;
+  }, { earnings: 0, losses: 0 });
+
+  const areaDistribution = habits.reduce((acc, h) => {
+      const area = h.area || 'Uncategorized';
+      if (!acc[area]) {
+          acc[area] = { name: area, count: 0, color: `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}` };
+      }
+      acc[area].count++;
+      return acc;
+  }, {});
+
+  const pieChartData = Object.values(areaDistribution);
+
+  const profitLossPerHabit = habits.map(habit => {
+      const historyForHabit = habitHistory.filter(h => h.habitId === habit.id);
+      const total = historyForHabit.reduce((sum, h) => sum + h.change, 0);
+      return { name: habit.name, total };
+  });
+
+  const barChartData = {
+    labels: profitLossPerHabit.map(h => h.name.substring(0,5)),
+    datasets: [{
+      data: profitLossPerHabit.map(h => h.total)
+    }]
+  };
+
+  const handleGenerateSummary = async () => {
+      setIsGenerating(true);
+      setSummaryModalVisible(true);
+      setSummary('✨ Analyzing your week with Gemini...');
+
+      const prompt = `Here is my habit data for the last 7 days: ${JSON.stringify(habitHistory)}. My habits are: ${JSON.stringify(habits)}. Please provide a concise, encouraging, and actionable weekly summary. Identify my strongest habit and my biggest challenge. Offer one specific tip for improvement. Keep it under 150 words.`;
+
+      if (!apiKey || apiKey.trim() === '') {
+          setSummary("Please set your Gemini API key in Settings first.");
+          setIsGenerating(false);
+          return;
+      }
+
+      let chatHistory = [{ role: "user", parts: [{ text: prompt }] }];
+      const payload = { contents: chatHistory };
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+      try {
+          const response = await fetch(apiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+          });
+          const result = await response.json();
+          if (result.candidates && result.candidates.length > 0) {
+              setSummary(result.candidates[0].content.parts[0].text);
+          } else {
+              setSummary("Could not generate a summary at this time. Check your API key.");
+          }
+      } catch (error) {
+          console.error("Gemini summary failed:", error);
+          setSummary("Error connecting to the AI for your summary.");
+      } finally {
+          setIsGenerating(false);
+      }
+  };
+
+  return (
+    <div style={styles.container}>
+      <div style={styles.scrollContent}>
+        <p style={styles.headerTitle}>Dashboard</p>
+
+        <Card style={{ marginBottom: 15, padding: 15 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ flex: 1 }}>
+              <p style={{ fontSize: 24, fontWeight: 'bold', color: '#f0f9ff', marginBottom: 0 }}>₹{wallet.balance.toFixed(2)}</p>
+              <p style={{ fontSize: 12, color: '#a1a1aa', marginTop: 0 }}>Balance</p>
+            </div>
+          </div>
+        </Card>
+
+        <Card style={{ marginBottom: 15 }}>
+          <p style={styles.cardTitle}>Overall Performance</p>
+          <div style={styles.summaryContainer}>
+            <div style={styles.summaryBox}>
+              <p style={styles.summaryLabel}>Total Earnings</p>
+              <p style={{...styles.summaryValue, color: '#4ade80' }}>{CURRENCY}{earningsData.earnings.toFixed(2)}</p>
+            </div>
+            <div style={styles.summaryBox}>
+              <p style={styles.summaryLabel}>Total Losses</p>
+              <p style={{...styles.summaryValue, color: '#f87171' }}>{CURRENCY}{earningsData.losses.toFixed(2)}</p>
+            </div>
+          </div>
+        </Card>
+
+        <div style={{...styles.sectionHeader, marginTop: 10, marginBottom: 15}}>
+          <AppButton title="✨ Generate Weekly Summary" onClick={handleGenerateSummary} disabled={isGenerating} style={{backgroundColor: '#581c87'}}/>
+        </div>
+
+        {pieChartData.length > 0 && (
+          <Card style={{ marginBottom: 15 }}>
+            <p style={styles.cardTitle}>Habit Area Distribution</p>
+            <CustomPieChart data={pieChartData} />
+          </Card>
+        )}
+
+        {barChartData.labels.length > 0 && (
+          <Card style={{ marginBottom: 15 }}>
+            <p style={styles.cardTitle}>Profit/Loss per Habit</p>
+            <CustomBarChart data={barChartData} />
+          </Card>
+        )}
+
+        {habits.length > 0 && habits.map(habit => <HabitCalendar key={habit.id} habit={habit} history={habitHistory} />)}
+      </div>
+      <CustomModal
+        visible={summaryModalVisible}
+        onClose={() => setSummaryModalVisible(false)}
+        title="✨ Your AI-Powered Weekly Summary"
+      >
+        <p style={{...styles.modalText, whiteSpace: 'normal'}}>{cleanText(summary)}</p>
+        <AppButton title="Close" onClick={() => setSummaryModalVisible(false)} disabled={isGenerating} style={{marginTop: 15}}/>
+      </CustomModal>
+    </div>
+  );
+};
+
+const HabitsScreen = ({ navigate }) => {
+  const { habits, habitHistory, updateHabit, deleteHabit, logHabitAction, isSaving } = useContext(WalletContext);
+  const [editHabit, setEditHabit] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [editArea, setEditArea] = useState('');
+  const [editReward, setEditReward] = useState('');
+  const [editPenalty, setEditPenalty] = useState('');
+  const [todayHabits, setTodayHabits] = useState([]);
+
+  useEffect(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const loggedTodayIds = habitHistory
+      .filter(h => h.date === todayStr)
+      .map(h => h.habitId);
+    setTodayHabits(habits.filter(h => !loggedTodayIds.includes(h.id)));
+  }, [habits, habitHistory]);
 
   const getHabitTrend = (habitId) => {
     const today = new Date();
@@ -370,44 +535,112 @@ const DashboardScreen = ({ navigate }) => {
     return '⚪️';
   };
 
+  const handleEdit = (habit) => {
+    setEditHabit(habit);
+    setEditName(habit.name);
+    setEditArea(habit.area || '');
+    setEditReward(habit.reward.toString());
+    setEditPenalty(habit.penalty.toString());
+  };
+
+  const handleSaveEdit = () => {
+    const updated = {
+      name: editName,
+      area: editArea,
+      reward: parseFloat(editReward),
+      penalty: parseFloat(editPenalty),
+    };
+    updateHabit(editHabit.id, updated);
+    setEditHabit(null);
+  };
+
+  const handleDelete = (id) => {
+    if (confirm('Delete this habit and all its history?')) {
+      deleteHabit(id);
+    }
+  };
+
+  const handleAction = (habit, status) => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const change = status === 'complete' ? habit.reward : -habit.penalty;
+    logHabitAction(habit.id, status, change, todayStr);
+  };
+
   return (
     <div style={styles.container}>
       <div style={styles.scrollContent}>
-        <p style={styles.headerTitle}>Dashboard</p>
-        
-        <div style={styles.walletCard}>
-          <p style={styles.walletLabel}>Wallet Balance</p>
-          <p style={styles.walletBalance}>{wallet.currency}{wallet.balance.toFixed(2)}</p>
-        </div>
+        <p style={styles.headerTitle}>My Habits</p>
 
-        <Card style={styles.suggestionCard}>
-            <p style={styles.suggestionTitle}>🤖 {suggestion.title}</p>
-            <p style={styles.suggestionMessage}>{suggestion.message}</p>
-        </Card>
-
-        <div style={styles.sectionHeader}>
-          <p style={styles.title}>Your Habits</p>
+        <div style={{...styles.sectionHeader, marginTop: 20, marginBottom: 10}}>
           <AppButton title="+ New Habit" onClick={() => navigate('CreateHabit')} style={styles.smallButton} textStyle={styles.smallButtonText} />
         </div>
 
         {habits.length === 0 ? (
           <p style={styles.emptyText}>No habits yet. Tap '+ New Habit' to create one!</p>
         ) : (
-          habits.map(item => (
-              <Card key={item.id} style={styles.habitItem}>
-                <p style={styles.habitTrend}>{getHabitTrend(item.id)}</p>
-                <div style={{ flex: 1 }}>
-                    <p style={styles.habitName}>{item.name}</p>
-                    <p style={styles.habitArea}>{item.area}</p>
-                </div>
-                <div style={{textAlign: 'right'}}>
-                    <p style={styles.habitReward}>+{CURRENCY}{item.reward}</p>
-                    <p style={styles.habitPenalty}>-{CURRENCY}{item.penalty}</p>
-                </div>
-              </Card>
-            ))
+          <>
+            {habits.map(item => (
+                <Card key={item.id} style={{ marginBottom: 8, borderRadius: 12, padding: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ flex: 1 }}>
+                      <span>{getHabitTrend(item.id)} {item.name} ({item.area})</span>
+                    </div>
+                    <div style={{textAlign: 'right', marginRight: 24}}>
+                        <span style={{color: '#4ade80', fontSize: 12}}>/{CURRENCY}{item.reward}</span>
+                        <span style={{color: '#f87171', fontSize: 12}}>/-{item.penalty}</span>
+                    </div>
+                    <div style={{ display: 'flex' }}>
+                      <button onClick={() => handleEdit(item)} style={{ marginRight: 5, fontSize: 14 }}>✏️</button>
+                      <button onClick={() => handleDelete(item.id)} style={{ fontSize: 14 }}>🗑️</button>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+          </>
+        )}
+
+        {todayHabits.length > 0 && (
+          <>
+            <p style={styles.title}>Today's Tracker</p>
+            {todayHabits.map(item => (
+                <Card key={item.id} style={{...styles.trackerItem, marginBottom: 10, borderRadius: 12, padding: 12}}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ flex: 1, fontWeight: 'bold' }}>{item.name} ({item.area})</span>
+                    <div style={{...styles.trackerActions, marginRight: 24}}>
+                      <button style={{...styles.actionButton, ...styles.completeButton}} onClick={() => handleAction(item, 'complete')} disabled={isSaving}>
+                        <span style={styles.actionButtonText}>✓</span>
+                      </button>
+                      <button style={{...styles.actionButton, ...styles.missButton}} onClick={() => handleAction(item, 'missed')}>
+                        <span style={styles.actionButtonText}>✕</span>
+                      </button>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+          </>
         )}
       </div>
+      <CustomModal
+        visible={editHabit !== null}
+        onClose={() => setEditHabit(null)}
+        title="Edit Habit"
+      >
+        <p style={styles.label}>Habit Name</p>
+        <input style={styles.input} value={editName} onChange={e => setEditName(e.target.value)} />
+        <p style={styles.label}>Area of Life</p>
+        <input style={styles.input} value={editArea} onChange={e => setEditArea(e.target.value)} />
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <div style={{ flex: 1, marginRight: 8 }}>
+            <p style={styles.label}>Reward ({CURRENCY})</p>
+            <input style={styles.input} type="number" value={editReward} onChange={e => setEditReward(e.target.value)} />
+          </div>
+          <div style={{ flex: 1, marginLeft: 8 }}>
+            <p style={styles.label}>Penalty ({CURRENCY})</p>
+            <input style={styles.input} type="number" value={editPenalty} onChange={e => setEditPenalty(e.target.value)} />
+          </div>
+        </div>
+        <AppButton title="Save Changes" onClick={handleSaveEdit} style={{ marginTop: 20 }} />
+      </CustomModal>
     </div>
   );
 };
@@ -418,10 +651,6 @@ const CreateHabitScreen = ({ navigate }) => {
   const [area, setArea] = useState(userProfile.focusArea || '');
   const [reward, setReward] = useState('');
   const [penalty, setPenalty] = useState('');
-  const [analysis, setAnalysis] = useState('');
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [suggestionModalVisible, setSuggestionModalVisible] = useState(false);
-  const [habitIdeas, setHabitIdeas] = useState('');
   const [creationCost, setCreationCost] = useState(35);
 
   useEffect(() => {
@@ -433,54 +662,6 @@ const CreateHabitScreen = ({ navigate }) => {
     const finalCost = baseCost * 7;
     setCreationCost(finalCost);
   }, [reward, penalty]);
-
-
-  // Gemini API Key is hardcoded, consider externalizing for security
-  const callGeminiAPI = async (prompt) => {
-      //setIsGenerating(true); // Keep loading state consistent if needed
-      setAnalysis('✨ Analyzing with Gemini...');
-      let chatHistory = [{ role: "user", parts: [{ text: prompt }] }];
-      const payload = { contents: chatHistory };
-      const apiKey = ""; // Left empty as per instructions
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-      
-      try {
-          const response = await fetch(apiUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
-          });
-          const result = await response.json();
-          if (result.candidates && result.candidates.length > 0 &&
-              result.candidates[0].content && result.candidates[0].content.parts &&
-              result.candidates[0].content.parts.length > 0) {
-            return result.candidates[0].content.parts[0].text;
-          } else {
-            return "Sorry, I couldn't generate a response right now.";
-          }
-      } catch (error) { // More specific error handling is good practice
-          console.error("Gemini API call failed:", error);
-          return "Error connecting to the AI. Please check your connection.";
-      } finally {
-          setIsGenerating(false);
-      }
-  };
-
-  const handleSuggestHabits = async () => {
-      const prompt = `Based on a primary life focus area of "${area || 'general well-being'}", suggest 5 creative and actionable daily habits. For each habit, provide a brief, one-sentence description. Format the response as a simple list.`;
-      const ideas = await callGeminiAPI(prompt); // Consider error handling for API call
-      setHabitIdeas(ideas);
-      setSuggestionModalVisible(true);
-  };
-  
-  const handleAnalyzeHabit = useCallback(async () => {
-    if (name && reward && penalty) {
-        const prompt = `Analyze a habit called "${name}" with a reward of ${CURRENCY}${reward} and a penalty of ${CURRENCY}${penalty}. Provide a short, motivational analysis (2-3 sentences) on its psychological effectiveness. Is it well-balanced, high-risk, or heavily incentivized?`;
-        const geminiAnalysis = await callGeminiAPI(prompt);
-        setAnalysis(geminiAnalysis); // Also consider error handling for API call
-    }
-  }, [name, reward, penalty]);
-
 
   const handleCreate = () => {
     if (wallet.balance < creationCost) {
@@ -496,9 +677,9 @@ const CreateHabitScreen = ({ navigate }) => {
       createdOn: new Date().toISOString(),
     };
     addHabit(newHabit, creationCost);
-    navigate('Dashboard');
+    navigate('Habits');
   };
-  
+
   const canAfford = wallet.balance >= creationCost;
   const isFormValid = name && area && reward && penalty && parseFloat(reward) >= 0 && parseFloat(penalty) >= 0 && canAfford;
 
@@ -506,10 +687,8 @@ const CreateHabitScreen = ({ navigate }) => {
     <div style={styles.container}>
       <div style={styles.scrollContent}>
         <p style={styles.headerTitle}>Create New Habit</p>
-        
+
         <Card>
-          <AppButton title="✨ Suggest Habit Ideas" onClick={handleSuggestHabits} disabled={isGenerating} style={{marginBottom: 20, backgroundColor: '#581c87'}}/>
-          
           <p style={styles.label}>Habit Name</p>
           <input style={styles.input} placeholder="e.g., Morning Workout" value={name} onChange={e => setName(e.target.value)} />
 
@@ -536,22 +715,10 @@ const CreateHabitScreen = ({ navigate }) => {
               Insufficient funds. Your balance is {CURRENCY}{wallet.balance.toFixed(2)}.
             </p>
           )}
-
-          <AppButton title="✨ Analyze Habit Structure" onClick={handleAnalyzeHabit} disabled={isGenerating || !name || !reward || !penalty} style={{marginTop: 10, backgroundColor: '#1d4ed8'}}/>
-          
-          {analysis && <p style={styles.analysisText}>{analysis}</p>}
         </Card>
 
-        <AppButton title="Create Habit" onClick={handleCreate} disabled={!isFormValid || isGenerating || isSaving} style={{ marginTop: 20 }} />
+        <AppButton title="Create Habit" onClick={handleCreate} disabled={!isFormValid || isSaving} style={{ marginTop: 20 }} />
       </div>
-      <CustomModal
-        visible={suggestionModalVisible}
-        onClose={() => setSuggestionModalVisible(false)}
-        title="✨ AI-Generated Habit Ideas"
-      >
-        <p style={{...styles.modalText, whiteSpace: 'pre-wrap'}}>{isGenerating ? 'Generating...' : habitIdeas}</p>
-        <AppButton title="Close" onClick={() => setSuggestionModalVisible(false)} style={{marginTop: 15}}/>
-      </CustomModal>
     </div>
   );
 };
@@ -595,18 +762,17 @@ const DailyTrackerScreen = ({ navigate }) => {
           </Card>
         ) : (
           todayHabits.map(item => (
-              <Card key={item.id} style={styles.trackerItem}>
-                <div>
-                  <p style={styles.habitName}>{item.name}</p>
-                  <p style={styles.habitArea}>{item.area}</p>
-                </div>
-                <div style={styles.trackerActions}>
-                  <button style={{...styles.actionButton, ...styles.completeButton}} onClick={() => handleAction(item, 'complete')} disabled={isSaving}>
-                    <span style={styles.actionButtonText}>✓</span>
-                  </button>
-                  <button style={{...styles.actionButton, ...styles.missButton}} onClick={() => handleAction(item, 'missed')}>
-                    <span style={styles.actionButtonText}>✕</span>
-                  </button>
+              <Card key={item.id} style={{...styles.trackerItem, marginBottom: 10, borderRadius: 12, padding: 12}}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ flex: 1, fontWeight: 'bold' }}>{item.name} ({item.area})</span>
+                  <div style={styles.trackerActions}>
+                    <button style={{...styles.actionButton, ...styles.completeButton}} onClick={() => handleAction(item, 'complete')} disabled={isSaving}>
+                      <span style={styles.actionButtonText}>✓</span>
+                    </button>
+                    <button style={{...styles.actionButton, ...styles.missButton}} onClick={() => handleAction(item, 'missed')}>
+                      <span style={styles.actionButtonText}>✕</span>
+                    </button>
+                  </div>
                 </div>
               </Card>
             ))
@@ -626,7 +792,7 @@ const DailyTrackerScreen = ({ navigate }) => {
 
 
 const ReportsScreen = ({ navigate }) => {
-  const { habits, habitHistory, isSaving } = useContext(WalletContext);
+  const { habits, habitHistory, apiKey, isSaving } = useContext(WalletContext);
   const [isGenerating, setIsGenerating] = useState(false);
   const [summary, setSummary] = useState('');
   const [summaryModalVisible, setSummaryModalVisible] = useState(false);
@@ -638,10 +804,15 @@ const ReportsScreen = ({ navigate }) => {
 
       const prompt = `Here is my habit data for the last 7 days: ${JSON.stringify(habitHistory)}. My habits are: ${JSON.stringify(habits)}. Please provide a concise, encouraging, and actionable weekly summary. Identify my strongest habit and my biggest challenge. Offer one specific tip for improvement. Keep it under 150 words.`;
 
+      if (!apiKey || apiKey.trim() === '') {
+          setSummary("Please set your Gemini API key in Settings first.");
+          setIsGenerating(false);
+          return;
+      }
+
       let chatHistory = [{ role: "user", parts: [{ text: prompt }] }];
       const payload = { contents: chatHistory };
-      const apiKey = "";
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`;
 
       try {
           const response = await fetch(apiUrl, {
@@ -653,7 +824,7 @@ const ReportsScreen = ({ navigate }) => {
           if (result.candidates && result.candidates.length > 0) {
               setSummary(result.candidates[0].content.parts[0].text);
           } else {
-              setSummary("Could not generate a summary at this time.");
+              setSummary("Could not generate a summary at this time. Check your API key.");
           }
       } catch (error) {
           console.error("Gemini summary failed:", error);
@@ -736,7 +907,7 @@ const ReportsScreen = ({ navigate }) => {
         onClose={() => setSummaryModalVisible(false)}
         title="✨ Your AI-Powered Weekly Summary"
       >
-        <p style={{...styles.modalText, whiteSpace: 'pre-wrap'}}>{summary}</p>
+        <p style={{...styles.modalText, whiteSpace: 'normal'}}>{cleanText(summary)}</p>
         <AppButton title="Close" onClick={() => setSummaryModalVisible(false)} disabled={isGenerating} style={{marginTop: 15}}/>
       </CustomModal>
     </div>
@@ -744,13 +915,11 @@ const ReportsScreen = ({ navigate }) => {
 };
 
 const SettingsScreen = ({ navigate, onReset }) => {
-    const { resetAppData } = useContext(WalletContext);
-    const [isResetModalVisible, setResetModalVisible] = useState(false);
+    const { apiKey, setApiKey, resetAppData, habits, logHabitAction, habitHistory } = useContext(WalletContext);
+    const [newApiKey, setNewApiKey] = useState(apiKey);
 
-    const handleReset = () => {
-        resetAppData();
-        setResetModalVisible(false);
-        onReset(); // Navigate back to onboarding
+    const handleSaveApiKey = () => {
+        setApiKey(newApiKey);
     };
 
     return (
@@ -759,17 +928,13 @@ const SettingsScreen = ({ navigate, onReset }) => {
                 <p style={styles.headerTitle}>Settings</p>
 
                 <Card>
-                    <p style={styles.cardTitle}>Data Management</p>
-                    <AppButton
-                        title="Reset All Data"
-                        onClick={() => setResetModalVisible(true)}
-                        style={{ backgroundColor: '#ef4444' }}
-                    />
-                    <p style={styles.settingDescription}>
-                        This will delete all your habits, history, and wallet data. This action cannot be undone.
-                    </p>
+                    <p style={styles.cardTitle}>AI API Configuration</p>
+                    <p style={styles.label}>Gemini API Key</p>
+                    <input style={styles.input} type="password" placeholder="Enter your API key" value={newApiKey} onChange={(e) => setNewApiKey(e.target.value)} />
+                    <AppButton title="Save API Key" onClick={handleSaveApiKey} style={{marginTop: 10}} />
+                    <p style={styles.settingDescription}>Required for AI features like habit suggestions and analysis. Get your free API key from Google AI Studio.</p>
                 </Card>
-                
+
                 <Card>
                     <p style={styles.cardTitle}>About Lifefolio</p>
                     <p style={styles.settingDescription}>
@@ -779,73 +944,9 @@ const SettingsScreen = ({ navigate, onReset }) => {
                         Invest in yourself, intelligently.
                     </p>
                 </Card>
-                <Card>
-                    <p style={styles.cardTitle}>Developer Options</p>
-                    <AppButton
-                        title="Run Auto Miss"
-                        onClick={() => {
-                            const userId = auth.currentUser.uid;
-                            const userDocRef = doc(db, 'users', userId);
-                            getDoc(userDocRef).then(docSnap => {
-                                const userData = docSnap.data();
-                                // Get the last auto miss date from firebase
-                                const lastAutoMissDate = userData.lastAutoMissDate ? userData.lastAutoMissDate.toDate() : null;
 
-                                // Get the current date in Indian timezone
-                                const now = new Date();
-                                const indianTimeZone = 'Asia/Kolkata';
-                                const indianTime = new Intl.DateTimeFormat('en-IN', { timeZone: indianTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
-                                const [month, day, year] = indianTime.split('/');
-                                const todayInIndianTime = `${year}-${month}-${day}`;
-
-                                if (lastAutoMissDate) {
-                                    const lastAutoMissDateInIndianTime = new Intl.DateTimeFormat('en-IN', { timeZone: indianTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(lastAutoMissDate);
-                                    const [lastMonth, lastDay, lastYear] = lastAutoMissDateInIndianTime.split('/');
-                                    const lastAutoMissDateStr = `${lastYear}-${lastMonth}-${lastDay}`;
-
-                                    if (lastAutoMissDateStr === todayInIndianTime) {
-                                        alert("Auto miss already run today");
-                                        return;
-                                    }
-                                }
-
-                                // Get yesterday's date in Indian timezone
-                                const yesterday = new Date(now);
-                                yesterday.setDate(yesterday.getDate() - 1);
-                                const yesterdayInIndianTime = new Intl.DateTimeFormat('en-IN', { timeZone: indianTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(yesterday);
-                                const [yesterdayMonth, yesterdayDay, yesterdayYear] = yesterdayInIndianTime.split('/');
-                                const yesterdayStr = `${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}`;
-
-                                const loggedYesterdayIds = new Set(habitHistory.filter(h => h.date === yesterdayStr).map(h => h.habitId));
-
-                                habits.forEach(habit => {
-                                    const habitStartDate = new Date(habit.createdOn).toISOString().split('T')[0];
-                                    if (habitStartDate <= yesterdayStr && !loggedYesterdayIds.has(habit.id)) {
-                                        logHabitAction(habit.id, 'missed', -habit.penalty, yesterdayStr);
-                                    }
-                                });
-
-                                // Update the last auto miss date in firebase
-                                setDoc(userDocRef, { lastAutoMissDate: now }, { merge: true });
-                                alert("Auto miss run successfully");
-                            });
-                        }}
-                        style={{ backgroundColor: '#ef4444' }}
-                    />
-                </Card>
 
             </div>
-            <CustomModal
-                visible={isResetModalVisible}
-                onClose={() => setResetModalVisible(false)}
-                title="Confirm Reset"
-            >
-                <p style={{...styles.modalText, whiteSpace: 'pre-wrap'}}>Are you sure you want to delete all your data? This is irreversible.</p>
-                <div style={{display: 'flex', justifyContent: 'space-around', marginTop: 20}}>
-                    <AppButton title="Cancel" onClick={() => setResetModalVisible(false)} style={{backgroundColor: '#6b7280', flex: 1, marginRight: 10}}/>
-                    <AppButton title="Yes, Reset" onClick={handleReset} style={{backgroundColor: '#ef4444', flex: 1}}/>
-                </div>
-            </CustomModal>
         </div>
     );
 };
@@ -886,23 +987,12 @@ const AppContent = () => {
             const yesterdayStr = `${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}`;
 
             habits.forEach(habit => {
-                const habitStartDate = new Date(habit.createdOn);
-                const habitStartDateInIndianTime = new Intl.DateTimeFormat('en-IN', { timeZone: indianTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(habitStartDate);
-                const [startMonth, startDay, startYear] = habitStartDateInIndianTime.split('/');
-                let currentDate = new Date(`${startYear}-${startMonth}-${startDay}`);
-
-                while (currentDate <= yesterday) {
-                    const currentDateInIndianTime = new Intl.DateTimeFormat('en-IN', { timeZone: indianTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(currentDate);
-                    const [currentMonth, currentDay, currentYear] = currentDateInIndianTime.split('/');
-                    const currentDateStr = `${currentYear}-${currentMonth}-${currentDay}`;
-
-                    const loggedForCurrentDate = habitHistory.some(h => h.habitId === habit.id && h.date === currentDateStr);
-
-                    if (!loggedForCurrentDate) {
-                        logHabitAction(habit.id, 'missed', -habit.penalty, currentDateStr);
+                const habitStartDate = new Date(habit.createdOn).toISOString().split('T')[0];
+                if (habitStartDate <= yesterdayStr) {
+                    const loggedForYesterday = habitHistory.some(h => h.habitId === habit.id && h.date === yesterdayStr);
+                    if (!loggedForYesterday) {
+                        logHabitAction(habit.id, 'missed', -habit.penalty, yesterdayStr);
                     }
-
-                    currentDate.setDate(currentDate.getDate() + 1);
                 }
             });
 
@@ -954,12 +1044,10 @@ const AppContent = () => {
         return <OnboardingScreen onComplete={() => navigate('Dashboard')} />;
       case 'Dashboard':
         return <DashboardScreen navigate={navigate} />;
+      case 'Habits':
+        return <HabitsScreen navigate={navigate} />;
       case 'CreateHabit':
         return <CreateHabitScreen navigate={navigate} />;
-      case 'Tracker':
-        return <DailyTrackerScreen navigate={navigate} />;
-      case 'Reports':
-        return <ReportsScreen navigate={navigate} />;
       case 'Settings':
         return <SettingsScreen navigate={navigate} onReset={handleReset} />;
       default:
@@ -978,13 +1066,10 @@ const AppContent = () => {
       {(currentScreen !== 'Onboarding' && currentScreen !== 'Loading') && (
         <div style={styles.navigation}>
             <button style={styles.navButton} onClick={() => navigate('Dashboard')}>
-                <span style={styles.navText}>🏠</span>
-            </button>
-            <button style={styles.navButton} onClick={() => navigate('Tracker')}>
-                <span style={styles.navText}>📆</span>
-            </button>
-            <button style={styles.navButton} onClick={() => navigate('Reports')}>
                 <span style={styles.navText}>📊</span>
+            </button>
+            <button style={styles.navButton} onClick={() => navigate('Habits')}>
+                <span style={styles.navText}>📆</span>
             </button>
             <button style={styles.navButton} onClick={() => navigate('Settings')}>
                 <span style={styles.navText}>⚙️</span>

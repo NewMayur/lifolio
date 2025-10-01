@@ -20,13 +20,15 @@ const styles = {
     paddingBottom: 100,
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: 'bold',
     color: '#f0f9ff',
     marginBottom: 10,
+    paddingLeft: 16,
+    paddingRight: 16,
   },
   title: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#e5e7eb',
     marginBottom: 10,
@@ -52,7 +54,7 @@ const styles = {
   },
   buttonText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     margin: 0,
   },
@@ -165,7 +167,7 @@ const styles = {
   habitItem: {
     display: 'flex',
     alignItems: 'center',
-    padding: 15,
+    padding: 12,
   },
   habitTrend: {
       fontSize: 24,
@@ -195,7 +197,7 @@ const styles = {
       color: '#93c5fd',
       fontStyle: 'italic',
       textAlign: 'center',
-      whiteSpace: 'pre-wrap',
+      whiteSpace: 'normal',
       lineHeight: 1.6,
       backgroundColor: 'rgba(23, 37, 84, 0.5)',
       padding: '10px',

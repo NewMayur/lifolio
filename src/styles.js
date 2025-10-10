@@ -235,7 +235,7 @@ const styles = {
     display: 'flex',
   },
   actionButton: {
-    width: 50,
+    width: 500,
     height: 50,
     borderRadius: 25,
     display: 'flex',

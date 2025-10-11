@@ -641,10 +641,10 @@ const DashboardScreen = ({ navigate }) => {
           style={{ ...styles.sectionHeader, marginTop: 10, marginBottom: 15 }}
         >
           <AppButton
-            title="✨ Generate Weeklyyyyyyyyyyy Summaryyyyyyyyy"
+            title="✨ Generate Weekly Summary"
             onClick={handleGenerateSummary}
             disabled={isGenerating}
-            style={{ backgroundColor: "#581c87" }}
+            style={{ backgroundColor: "#581c87" , padding: "5px 10px"}}
           />
         </div>
 
@@ -795,18 +795,17 @@ const HabitsScreen = ({ navigate }) => {
                     justifyContent: "space-between",
                   }}
                 >
-                  <div style={{ flex: 1 }}>
+                  <div style={{ flex: 1, color: "white" }}>
                     <span>
                       {getHabitTrend(item.id)} {item.name} ({item.area})
                     </span>
                   </div>
                   <div style={{ textAlign: "right", marginRight: 24 }}>
-                    <span style={{ color: "#4ade80", fontSize: 12 }}>
-                      /{CURRENCY}
-                      {item.reward}
+                    <span style={{ color: "#4ade80", fontSize: 12 , padding: "5px"}}>
+                      {" " + " / " + CURRENCY + item.reward + " "}
                     </span>
                     <span style={{ color: "#f87171", fontSize: 12 }}>
-                      /-{item.penalty}
+                      {" " + " / - " + CURRENCY + item.penalty + " "}
                     </span>
                   </div>
                   <div style={{ display: "flex" }}>
@@ -849,10 +848,10 @@ const HabitsScreen = ({ navigate }) => {
                     justifyContent: "space-between",
                   }}
                 >
-                  <span style={{ flex: 1, fontWeight: "bold" }}>
+                  <span style={{ flex: 1, color: "white", fontWeight: "bold" }}>
                     {item.name} ({item.area})
                   </span>
-                  <div style={{ ...styles.trackerActions, marginRight: 24 }}>
+                  <div style={{ ...styles.trackerActions }}>
                     <button
                       style={{
                         ...styles.actionButton,
@@ -1328,7 +1327,7 @@ const SettingsScreen = ({ navigate, onReset }) => {
           <AppButton
             title="Save API Key"
             onClick={handleSaveApiKey}
-            style={{ marginTop: 10 }}
+            style={{ marginTop: 10, padding: "5px 10px" }}
           />
           <p style={styles.settingDescription}>
             Required for AI features like habit suggestions and analysis. Get
@@ -1479,7 +1478,7 @@ const AppContent = () => {
   return (
     <div style={styles.appContainer}>
       <AutoMissHandler />
-      <div style={{ flex: 1, overflowY: "auto", height: "100%" }}>
+      <div>
         {renderMainApp()}
       </div>
       {/* Navigation bar, visible only on the main app screens */}
@@ -1505,6 +1504,7 @@ const AppContent = () => {
 
 // The final export statement for the App component.
 export default function App() {
+
   return (
     <WalletProvider>
       <AppContent />

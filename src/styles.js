@@ -1,21 +1,25 @@
+import { max } from "moment-timezone";
+
 // --- STYLES (Web Version using JS Objects) ---
 const styles = {
   appContainer: {
-    display: 'flex',
-    flexDirection: 'column',
+    margin: "0 auto",
+    maxWidth: "40rem",
     height: '100vh',
-    maxHeight: '100vh',
     backgroundColor: '#1c1917',
     fontFamily: 'sans-serif',
+    overflow: 'auto',
   },
   container: {
-    flex: 1,
+    minWidth: '100%', 
+    height: "100vh",
     backgroundColor: '#1c1917',
     paddingTop: 40,
     boxSizing: 'border-box',
     overflowY: 'auto',
   },
   scrollContent: {
+    width: "100%",
     padding: 20,
     paddingBottom: 100,
   },
@@ -227,15 +231,13 @@ const styles = {
     marginTop: 10,
   },
   trackerItem: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+
   },
   trackerActions: {
-    display: 'flex',
+    display: "flex"
   },
   actionButton: {
-    width: 500,
+    width: 50,
     height: 50,
     borderRadius: 25,
     display: 'flex',
@@ -280,18 +282,21 @@ const styles = {
   },
   navigation: {
     display: 'flex',
+    position: 'sticky',
+    bottom: 0,
+    zIndex: "99",
     height: 65,
     backgroundColor: '#262626',
     borderTop: '1px solid #404040',
     justifyContent: 'space-around',
-    alignItems: 'center',
-    flexShrink: 0,
+    alignItems: 'center'
   },
   navButton: {
-    flex: 1,
     background: 'none',
     border: 'none',
     cursor: 'pointer',
+    width: "100px",
+    padding: "10px 0px"
   },
   navText: {
     fontSize: 28,

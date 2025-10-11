@@ -83,7 +83,7 @@ const LoginScreen = () => {
             title={isSignUp ? 'Sign Up' : 'Sign In'}
             onClick={handleSubmit}
             disabled={!email || !password || isLoading}
-            style={{ marginTop: 10 }}
+            style={{ marginTop: 10 , padding: "5px 10px" }}
           />
 
           <div style={{ textAlign: 'center', marginTop: 20 }}>

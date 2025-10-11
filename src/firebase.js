@@ -1,14 +1,16 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getAnalytics } from "firebase/analytics";
 import { getAuth, browserLocalPersistence } from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCCnwiFhSiTVnoqmIUWBglzYZ1rkhHUcQs",
-  authDomain: "lifolio-dev.firebaseapp.com",
-  projectId: "lifolio-dev",
-  storageBucket: "lifolio-dev.firebasestorage.app",
-  messagingSenderId: "137728516716",
-  appId: "1:137728516716:web:adc40fbf1092f77ea82e49"
+  apiKey: "AIzaSyB8hWXctYahlS01CSYqFVKvtxklWmi1hlU",
+  authDomain: "lifolio-stag.firebaseapp.com",
+  projectId: "lifolio-stag",
+  storageBucket: "lifolio-stag.firebasestorage.app",
+  messagingSenderId: "219224999349",
+  appId: "1:219224999349:web:87f059cd412c176c4505fc",
+  measurementId: "G-SCW4K2W6WM"
 };
 
 // Initialize Firebase

@@ -1,32 +1,38 @@
+import { max } from "moment-timezone";
+
 // --- STYLES (Web Version using JS Objects) ---
 const styles = {
   appContainer: {
-    display: 'flex',
-    flexDirection: 'column',
+    margin: "0 auto",
+    maxWidth: "40rem",
     height: '100vh',
-    maxHeight: '100vh',
     backgroundColor: '#1c1917',
     fontFamily: 'sans-serif',
+    overflow: 'auto',
   },
   container: {
-    flex: 1,
+    minWidth: '100%', 
+    height: "100vh",
     backgroundColor: '#1c1917',
     paddingTop: 40,
     boxSizing: 'border-box',
     overflowY: 'auto',
   },
   scrollContent: {
+    width: "100%",
     padding: 20,
     paddingBottom: 100,
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: 'bold',
     color: '#f0f9ff',
     marginBottom: 10,
+    paddingLeft: 16,
+    paddingRight: 16,
   },
   title: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#e5e7eb',
     marginBottom: 10,
@@ -52,7 +58,7 @@ const styles = {
   },
   buttonText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     margin: 0,
   },
@@ -165,7 +171,7 @@ const styles = {
   habitItem: {
     display: 'flex',
     alignItems: 'center',
-    padding: 15,
+    padding: 12,
   },
   habitTrend: {
       fontSize: 24,
@@ -195,7 +201,7 @@ const styles = {
       color: '#93c5fd',
       fontStyle: 'italic',
       textAlign: 'center',
-      whiteSpace: 'pre-wrap',
+      whiteSpace: 'normal',
       lineHeight: 1.6,
       backgroundColor: 'rgba(23, 37, 84, 0.5)',
       padding: '10px',
@@ -225,12 +231,10 @@ const styles = {
     marginTop: 10,
   },
   trackerItem: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+
   },
   trackerActions: {
-    display: 'flex',
+    display: "flex"
   },
   actionButton: {
     width: 50,
@@ -278,18 +282,21 @@ const styles = {
   },
   navigation: {
     display: 'flex',
+    position: 'sticky',
+    bottom: 0,
+    zIndex: "99",
     height: 65,
     backgroundColor: '#262626',
     borderTop: '1px solid #404040',
     justifyContent: 'space-around',
-    alignItems: 'center',
-    flexShrink: 0,
+    alignItems: 'center'
   },
   navButton: {
-    flex: 1,
     background: 'none',
     border: 'none',
     cursor: 'pointer',
+    width: "100px",
+    padding: "10px 0px"
   },
   navText: {
     fontSize: 28,

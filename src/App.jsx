@@ -133,9 +133,18 @@ const WalletProvider = ({ children }) => {
   };
 
   const logHabitAction = (habitId, status, change, date) => {
-    const newLog = { habitId, date, status, change };
-    setHabitHistory((prev) => [...prev, newLog]);
-    updateWallet(change);
+    setHabitHistory((prev) => {
+      const existingIndex = prev.findIndex(
+        (h) => h.habitId === habitId && h.date === date
+      );
+      if (existingIndex >= 0) {
+        return prev;
+      } else {
+        const newLog = { habitId, date, status, change };
+        updateWallet(change);
+        return [...prev, newLog];
+      }
+    });
   };
   const resetAppData = async () => {
     if (user) {
@@ -644,7 +653,7 @@ const DashboardScreen = ({ navigate }) => {
             title="✨ Generate Weekly Summary"
             onClick={handleGenerateSummary}
             disabled={isGenerating}
-            style={{ backgroundColor: "#581c87" , padding: "5px 10px"}}
+            style={{ backgroundColor: "#581c87", padding: "5px 10px" }}
           />
         </div>
 
@@ -801,11 +810,28 @@ const HabitsScreen = ({ navigate }) => {
                     </span>
                   </div>
                   <div style={{ textAlign: "right", marginRight: 24 }}>
-                    <span style={{ color: "#4ade80", fontSize: 12 , padding: "5px"}}>
-                      {" " + " / " + CURRENCY + item.reward + " "}
+                    <span
+                      style={{
+                        color: "#4ade80",
+                        fontSize: 14,
+                        fontWeight: "bold",
+                        // paddingVertical: "5px",
+                        // paddingHorizontal: "8px",
+                      }}
+                    >
+                      {" " + CURRENCY + item.reward + " "}
                     </span>
-                    <span style={{ color: "#f87171", fontSize: 12 }}>
-                      {" " + " / - " + CURRENCY + item.penalty + " "}
+                    <span
+                      style={{
+                        color: "#f87171",
+                        fontSize: 14,
+                        fontWeight: "bold",
+                        // paddingVertical: "5px",
+                        // paddingHorizontal: "8px",
+                        marginLeft: 8,
+                      }}
+                    >
+                      {" " + CURRENCY + item.penalty + " "}
                     </span>
                   </div>
                   <div style={{ display: "flex" }}>
@@ -1359,7 +1385,7 @@ const AppContent = () => {
   const { isLoading, userProfile, user, habits, habitHistory, logHabitAction } =
     useContext(WalletContext);
 
-  // The AutoMissHandler component checks for missed habits daily.
+  // The AutoMissHandler component checks for missed habits for all past days.
   // It's defined here because it needs access to the context.
   const AutoMissHandler = () => {
     useEffect(() => {
@@ -1369,46 +1395,86 @@ const AppContent = () => {
         const userId = user.uid;
         const userDocRef = doc(db, "users", userId);
         const docSnap = await getDoc(userDocRef);
-        const userData = docSnap.data();
+        const userData = docSnap.data() || {};
 
-        // Get the last auto miss date from firebase
-        const lastAutoMissDate = userData.lastAutoMissDate
-          ? userData.lastAutoMissDate.toDate()
-          : null;
+        const today = new Date();
+        const todayStr = today.toISOString().split("T")[0];
+        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const yesterdayStr = yesterday.toISOString().split("T")[0];
 
-        // Get the current date in Indian timezone
-        const now = new Date();
-        const indianTimeZone = "Asia/Kolkata";
+        // Get the last processed date from Firestore (stored as string)
+        // If null, find the earliest date we need to process
+        let lastProcessedDate = userData.lastAutoProcessedDateStr;
 
-        // Get yesterday's date in Indian timezone
-        const yesterday = new Date(now);
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayInIndianTime = new Intl.DateTimeFormat("en-IN", {
-          timeZone: indianTimeZone,
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        }).format(yesterday);
-        const [yesterdayMonth, yesterdayDay, yesterdayYear] =
-          yesterdayInIndianTime.split("/");
-        const yesterdayStr = `${yesterdayYear}-${yesterdayMonth}-${yesterdayDay}`;
+        if (!lastProcessedDate) {
+          // If no last processed date, find the max date in history or earliest habit creation -1 day
+          const maxHistoryDate =
+            habitHistory.length > 0
+              ? habitHistory.reduce(
+                  (max, h) => (h.date > max ? h.date : max),
+                  "2000-01-01"
+                )
+              : yesterdayStr;
+          const earliestHabitDate =
+            habits.length > 0
+              ? habits.reduce((min, h) => {
+                  const hDate = new Date(h.createdOn)
+                    .toISOString()
+                    .split("T")[0];
+                  return hDate < min ? hDate : min;
+                }, maxHistoryDate)
+              : maxHistoryDate;
+          lastProcessedDate = earliestHabitDate; // Will process from this date onwards
+        }
 
-        habits.forEach((habit) => {
-          const habitStartDate = new Date(habit.createdOn)
-            .toISOString()
-            .split("T")[0];
-          if (habitStartDate <= yesterdayStr) {
-            const loggedForYesterday = habitHistory.some(
-              (h) => h.habitId === habit.id && h.date === yesterdayStr
-            );
-            if (!loggedForYesterday) {
-              logHabitAction(habit.id, "missed", -habit.penalty, yesterdayStr);
+        // If already processed up to yesterday, nothing to do
+        if (lastProcessedDate >= yesterdayStr) {
+          console.log("Auto-miss is up to date.");
+          return;
+        }
+
+        console.log(
+          `Auto-miss processing from ${lastProcessedDate} to ${yesterdayStr}`
+        );
+
+        // Generate all dates from lastProcessedDate + 1 to yesterday
+        const startDate = new Date(lastProcessedDate);
+        startDate.setDate(startDate.getDate() + 1); // Next day after last processed
+        const datesToProcess = [];
+        for (
+          let d = new Date(startDate);
+          d <= yesterday;
+          d.setDate(d.getDate() + 1)
+        ) {
+          datesToProcess.push(d.toISOString().split("T")[0]);
+        }
+
+        // For each date to process
+        for (const dateStr of datesToProcess) {
+          // For each active habit on this date
+          habits.forEach((habit) => {
+            const habitStartDate = new Date(habit.createdOn)
+              .toISOString()
+              .split("T")[0];
+            if (habitStartDate <= dateStr) {
+              const loggedOnDate = habitHistory.some(
+                (h) => h.habitId === habit.id && h.date === dateStr
+              );
+              if (!loggedOnDate) {
+                console.log(`Auto-missing habit: ${habit.name} for ${dateStr}`);
+                logHabitAction(habit.id, "missed", -habit.penalty, dateStr);
+              }
             }
-          }
-        });
+          });
+        }
 
-        // Update the last auto miss date in firebase
-        await setDoc(userDocRef, { lastAutoMissDate: now }, { merge: true });
+        // Update the last processed date to yesterday
+        await setDoc(
+          userDocRef,
+          { lastAutoProcessedDateStr: yesterdayStr },
+          { merge: true }
+        );
+        console.log("Auto-miss processing completed.");
       };
 
       runAutoMiss();
@@ -1478,9 +1544,7 @@ const AppContent = () => {
   return (
     <div style={styles.appContainer}>
       <AutoMissHandler />
-      <div>
-        {renderMainApp()}
-      </div>
+      <div>{renderMainApp()}</div>
       {/* Navigation bar, visible only on the main app screens */}
       {currentScreen !== "Onboarding" && currentScreen !== "Loading" && (
         <div style={styles.navigation}>
@@ -1504,7 +1568,6 @@ const AppContent = () => {
 
 // The final export statement for the App component.
 export default function App() {
-
   return (
     <WalletProvider>
       <AppContent />

@@ -174,6 +174,12 @@ const WalletProvider = ({ children }) => {
     setHabitHistory((prev) => prev.filter((h) => h.habitId !== id));
   };
 
+  const archiveHabit = (id, archived = true) => {
+    setHabits((prev) =>
+      prev.map((h) => (h.id === id ? { ...h, archived } : h))
+    );
+  };
+
   // All the values the rest of the app needs
   const contextValue = {
     wallet,
@@ -186,6 +192,7 @@ const WalletProvider = ({ children }) => {
     addHabit,
     updateHabit,
     deleteHabit,
+    archiveHabit,
     logHabitAction,
     resetAppData,
     isLoading,
@@ -303,7 +310,6 @@ const CustomModal = ({ visible, onClose, children, title }) => {
   );
 };
 
-// --- CHART COMPONENTS (Web Version) ---
 const CustomPieChart = ({ data }) => {
   const total = data.reduce((sum, item) => sum + item.count, 0);
   if (total === 0) return <p style={styles.emptyText}>No data for chart.</p>;
@@ -341,8 +347,9 @@ const CustomPieChart = ({ data }) => {
 };
 
 const CustomBarChart = ({ data }) => {
-  if (!data.labels || data.labels.length === 0)
+  if (!data || !data.labels || data.datasets.length === 0) {
     return <p style={styles.emptyText}>No data for chart.</p>;
+  }
 
   const values = data.datasets[0].data;
   const maxVal = Math.max(...values.map((v) => Math.abs(v)), 1);
@@ -358,7 +365,59 @@ const CustomBarChart = ({ data }) => {
               backgroundColor: value >= 0 ? "#4ade80" : "#f87171",
             }}
           ></div>
-          <p style={styles.barLabel}>{data.labels[index]}</p>
+          <p
+            style={{
+              ...styles.barLabel,
+              paddingTop: 5,
+              color: "white",
+              fontSize: 12,
+            }}
+          >
+            {data.labels[index]}
+            <br />
+            {CURRENCY}
+            {value.toFixed(2)}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const ProfitLossChart = ({ data, title, color, unit = "" }) => {
+  if (!data.labels || data.labels.length === 0)
+    return <p style={styles.emptyText}>No data for chart.</p>;
+
+  const values = data.datasets[0].data;
+  const maxVal = Math.max(...values.map((v) => Math.abs(v)), 1);
+
+  return (
+    <div style={styles.barChartContainer}>
+      <h3 style={{ color: "white", textAlign: "center", marginBottom: 10 }}>
+        {title}
+      </h3>
+      {values.map((value, index) => (
+        <div key={index} style={styles.barWrapper}>
+          <div
+            style={{
+              ...styles.bar,
+              height: `${(Math.abs(value) / maxVal) * 100}%`,
+              backgroundColor: color,
+            }}
+          ></div>
+          <p
+            style={{
+              ...styles.barLabel,
+              paddingTop: 5,
+              color: "white",
+              fontSize: 12,
+            }}
+          >
+            {data.labels[index]}
+            <br />
+            {unit}
+            {value.toFixed(2)}
+          </p>
         </div>
       ))}
     </div>
@@ -510,18 +569,23 @@ const DashboardScreen = ({ navigate }) => {
     );
   }
 
+  // Ensure habits and habitHistory are proper arrays
+  const safeHabits = Array.isArray(habits) ? habits : [];
+  const safeHabitHistory = Array.isArray(habitHistory) ? habitHistory : [];
+
   // Overall performance from reports
-  const earningsData = habitHistory.reduce(
+  const earningsData = safeHabitHistory.reduce(
     (acc, h) => {
-      if (h.change > 0) acc.earnings += h.change;
-      else acc.losses += Math.abs(h.change);
+      const change = Number(h?.change) || 0;
+      if (change > 0) acc.earnings += change;
+      else if (change < 0) acc.losses += Math.abs(change);
       return acc;
     },
     { earnings: 0, losses: 0 }
   );
 
-  const areaDistribution = habits.reduce((acc, h) => {
-    const area = h.area || "Uncategorized";
+  const areaDistribution = safeHabits.reduce((acc, h) => {
+    const area = h?.area || "Uncategorized";
     if (!acc[area]) {
       acc[area] = {
         name: area,
@@ -537,10 +601,18 @@ const DashboardScreen = ({ navigate }) => {
 
   const pieChartData = Object.values(areaDistribution);
 
-  const profitLossPerHabit = habits.map((habit) => {
-    const historyForHabit = habitHistory.filter((h) => h.habitId === habit.id);
-    const total = historyForHabit.reduce((sum, h) => sum + h.change, 0);
-    return { name: habit.name, total };
+  const profitLossPerHabit = safeHabits.map((habit) => {
+    const historyForHabit = safeHabitHistory.filter(
+      (h) => h?.habitId === habit?.id
+    );
+    const total = historyForHabit.reduce(
+      (sum, h) => sum + (Number(h?.change) || 0),
+      0
+    );
+    const missedCount = historyForHabit.filter(
+      (h) => h?.status === "missed"
+    ).length;
+    return { name: habit?.name || "Unknown", total, missedCount };
   });
 
   const barChartData = {
@@ -598,7 +670,7 @@ const DashboardScreen = ({ navigate }) => {
   return (
     <div style={styles.container}>
       <div style={styles.scrollContent}>
-        <p style={styles.headerTitle}>Dashboard</p>
+        <p style={{ ...styles.headerTitle, color: "#ffffffff" }}>Dashboard</p>
 
         <Card style={{ marginBottom: 15, padding: 15 }}>
           <div
@@ -619,7 +691,7 @@ const DashboardScreen = ({ navigate }) => {
               >
                 ₹{wallet.balance.toFixed(2)}
               </p>
-              <p style={{ fontSize: 12, color: "#a1a1aa", marginTop: 0 }}>
+              <p style={{ fontSize: 12, color: "#ffffffff", marginTop: 0 }}>
                 Balance
               </p>
             </div>
@@ -664,11 +736,52 @@ const DashboardScreen = ({ navigate }) => {
           </Card>
         )}
 
-        {barChartData.labels.length > 0 && (
-          <Card style={{ marginBottom: 15 }}>
-            <p style={styles.cardTitle}>Profit/Loss per Habit</p>
-            <CustomBarChart data={barChartData} />
-          </Card>
+        {profitLossPerHabit.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
+            {/* Separate chart for profits */}
+            {profitLossPerHabit.filter((h) => h.total > 0).length > 0 && (
+              <Card>
+                <p style={styles.cardTitle}>Profits per Habit</p>
+                <ProfitLossChart
+                  data={{
+                    labels: profitLossPerHabit
+                      .filter((h) => h.total > 0)
+                      .map((h) => h.name.substring(0, 5)),
+                    datasets: [
+                      {
+                        data: profitLossPerHabit
+                          .filter((h) => h.total > 0)
+                          .map((h) => h.total),
+                      },
+                    ],
+                  }}
+                  color="#4ade80"
+                />
+              </Card>
+            )}
+
+            {/* Separate chart for losses */}
+            {profitLossPerHabit.filter((h) => h.missedCount > 0).length > 0 && (
+              <Card>
+                <p style={styles.cardTitle}>Missed Habits</p>
+                <ProfitLossChart
+                  data={{
+                    labels: profitLossPerHabit
+                      .filter((h) => h.missedCount > 0)
+                      .map((h) => h.name.substring(0, 5)),
+                    datasets: [
+                      {
+                        data: profitLossPerHabit
+                          .filter((h) => h.missedCount > 0)
+                          .map((h) => h.missedCount),
+                      },
+                    ],
+                  }}
+                  color="#f87171"
+                />
+              </Card>
+            )}
+          </div>
         )}
 
         {habits.length > 0 &&
@@ -705,6 +818,7 @@ const HabitsScreen = ({ navigate }) => {
     habitHistory,
     updateHabit,
     deleteHabit,
+    archiveHabit,
     logHabitAction,
     isSaving,
   } = useContext(WalletContext);
@@ -720,7 +834,9 @@ const HabitsScreen = ({ navigate }) => {
     const loggedTodayIds = habitHistory
       .filter((h) => h.date === todayStr)
       .map((h) => h.habitId);
-    setTodayHabits(habits.filter((h) => !loggedTodayIds.includes(h.id)));
+    setTodayHabits(
+      habits.filter((h) => !loggedTodayIds.includes(h.id) && !h.archived)
+    );
   }, [habits, habitHistory]);
 
   const getHabitTrend = (habitId) => {
@@ -764,10 +880,22 @@ const HabitsScreen = ({ navigate }) => {
     }
   };
 
+  const handleArchive = (id, archived) => {
+    archiveHabit(id, archived);
+  };
+
   const handleAction = (habit, status) => {
     const todayStr = new Date().toISOString().split("T")[0];
     const change = status === "complete" ? habit.reward : -habit.penalty;
     logHabitAction(habit.id, status, change, todayStr);
+  };
+
+  const activeHabits = habits.filter((h) => !h.archived);
+  const archivedHabits = habits.filter((h) => h.archived);
+
+  const calculateHabitProfit = (habitId) => {
+    const history = habitHistory.filter((h) => h.habitId === habitId);
+    return history.reduce((sum, h) => sum + h.change, 0);
   };
 
   return (
@@ -786,163 +914,220 @@ const HabitsScreen = ({ navigate }) => {
           />
         </div>
 
-        {habits.length === 0 ? (
+        {/* Active Habits with merged list/tracker layout */}
+        {activeHabits.length === 0 ? (
           <p style={styles.emptyText}>
-            No habits yet. Tap '+ New Habit' to create one!
+            No active habits. Create your first habit!
           </p>
         ) : (
-          <>
-            {habits.map((item) => (
+          activeHabits.map((habit) => {
+            const profitLoss = calculateHabitProfit(habit.id);
+            return (
               <Card
-                key={item.id}
-                style={{ marginBottom: 8, borderRadius: 12, padding: 12 }}
+                key={habit.id}
+                style={{ marginBottom: 12, borderRadius: 12 }}
               >
+                {/* First Row: Clickable Habit Name */}
                 <div
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
+                    cursor: "pointer",
+                    padding: "12px",
+                    fontSize: 16,
+                    fontWeight: "bold",
+                    color: "#ffffff",
                   }}
+                  onClick={() => handleEdit(habit)}
                 >
-                  <div style={{ flex: 1, color: "white" }}>
-                    <span>
-                      {getHabitTrend(item.id)} {item.name} ({item.area})
-                    </span>
-                  </div>
-                  <div style={{ textAlign: "right", marginRight: 24 }}>
-                    <span
-                      style={{
-                        color: "#4ade80",
-                        fontSize: 14,
-                        fontWeight: "bold",
-                        // paddingVertical: "5px",
-                        // paddingHorizontal: "8px",
-                      }}
-                    >
-                      {" " + CURRENCY + item.reward + " "}
-                    </span>
-                    <span
-                      style={{
-                        color: "#f87171",
-                        fontSize: 14,
-                        fontWeight: "bold",
-                        // paddingVertical: "5px",
-                        // paddingHorizontal: "8px",
-                        marginLeft: 8,
-                      }}
-                    >
-                      {" " + CURRENCY + item.penalty + " "}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex" }}>
-                    <button
-                      onClick={() => handleEdit(item)}
-                      style={{ marginRight: 5, fontSize: 14 }}
-                    >
-                      ✏️
-                    </button>
-                    <button
-                      onClick={() => handleDelete(item.id)}
-                      style={{ fontSize: 14 }}
-                    >
-                      🗑️
-                    </button>
-                  </div>
+                  {getHabitTrend(habit.id)} {habit.name} ({habit.area})
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: "#a1a1aa",
+                      margin: "4px 0 0 0",
+                    }}
+                  ></p>
                 </div>
-              </Card>
-            ))}
-          </>
-        )}
 
-        {todayHabits.length > 0 && (
-          <>
-            <p style={styles.title}>Today's Tracker</p>
-            {todayHabits.map((item) => (
-              <Card
-                key={item.id}
-                style={{
-                  ...styles.trackerItem,
-                  marginBottom: 10,
-                  borderRadius: 12,
-                  padding: 12,
-                }}
-              >
+                {/* Second Row: Profit/Loss on left, Tracker on right */}
                 <div
                   style={{
                     display: "flex",
-                    alignItems: "center",
                     justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "8px 12px",
+                    borderTop: "1px solid #404040",
                   }}
                 >
-                  <span style={{ flex: 1, color: "white", fontWeight: "bold" }}>
-                    {item.name} ({item.area})
-                  </span>
-                  <div style={{ ...styles.trackerActions }}>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      color: profitLoss >= 0 ? "#4ade80" : "#f87171",
+                    }}
+                  >
+                    {profitLoss >= 0 ? "+" : ""}
+                    {profitLoss.toFixed(2)}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      color: profitLoss >= 0 ? "#de4a4aff" : "#f87171",
+                    }}
+                  >
+                    {profitLoss >= 0 ? "-" : ""}
+                    {habit.penalty}
+                  </div>
+                  <div style={styles.trackerActions}>
                     <button
                       style={{
                         ...styles.actionButton,
                         ...styles.completeButton,
                       }}
-                      onClick={() => handleAction(item, "complete")}
+                      onClick={() => handleAction(habit, "complete")}
                       disabled={isSaving}
                     >
                       <span style={styles.actionButtonText}>✓</span>
                     </button>
                     <button
                       style={{ ...styles.actionButton, ...styles.missButton }}
-                      onClick={() => handleAction(item, "missed")}
+                      onClick={() => handleAction(habit, "missed")}
                     >
                       <span style={styles.actionButtonText}>✕</span>
                     </button>
                   </div>
                 </div>
               </Card>
-            ))}
+            );
+          })
+        )}
+
+        {/* Archived Habits Section */}
+        {archivedHabits.length > 0 && (
+          <>
+            <Card style={{ marginTop: 30, marginBottom: 15 }}>
+              <p style={{ ...styles.cardTitle, color: "#9ca3af" }}>
+                Archived Habits
+              </p>
+              {archivedHabits.map((habit) => {
+                const profitLoss = calculateHabitProfit(habit.id);
+                return (
+                  <div
+                    key={habit.id}
+                    style={{
+                      marginBottom: 10,
+                      padding: "8px",
+                      borderRadius: 8,
+                      backgroundColor: "#374151",
+                      color: "#9ca3af",
+                    }}
+                  >
+                    <div style={{ fontSize: 14 }}>
+                      {habit.name} ({habit.area})
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginTop: 4,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: profitLoss >= 0 ? "#4ade80" : "#f87171",
+                        }}
+                      >
+                        Total: ${profitLoss >= 0 ? "+" : ""}
+                        {profitLoss.toFixed(2)}
+                      </span>
+                      <AppButton
+                        title="Unarchive"
+                        onClick={() => handleArchive(habit.id, false)}
+                        style={{
+                          backgroundColor: "#374151",
+                          padding: "4px 8px",
+                          fontSize: 12,
+                        }}
+                        textStyle={{ fontSize: 12 }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </Card>
           </>
         )}
       </div>
+
+      {/* Habit Modal with Edit/Delete/Archive */}
       <CustomModal
         visible={editHabit !== null}
         onClose={() => setEditHabit(null)}
-        title="Edit Habit"
+        title="Habit Options"
       >
-        <p style={styles.label}>Habit Name</p>
-        <input
-          style={styles.input}
-          value={editName}
-          onChange={(e) => setEditName(e.target.value)}
-        />
-        <p style={styles.label}>Area of Life</p>
-        <input
-          style={styles.input}
-          value={editArea}
-          onChange={(e) => setEditArea(e.target.value)}
-        />
+        <Card style={{ marginBottom: 15 }}>
+          <p style={{ ...styles.label, marginBottom: 8 }}>Habit Name</p>
+          <input
+            style={styles.input}
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+          />
+          <p style={{ ...styles.label, marginBottom: 8, marginTop: 15 }}>
+            Area of Life
+          </p>
+          <input
+            style={styles.input}
+            value={editArea}
+            onChange={(e) => setEditArea(e.target.value)}
+          />
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              marginTop: 15,
+            }}
+          >
+            <div style={{ flex: 1, marginRight: 8 }}>
+              <p style={styles.label}>Reward ({CURRENCY})</p>
+              <input
+                style={styles.input}
+                type="number"
+                value={editReward}
+                onChange={(e) => setEditReward(e.target.value)}
+              />
+            </div>
+            <div style={{ flex: 1, marginLeft: 8 }}>
+              <p style={styles.label}>Penalty ({CURRENCY})</p>
+              <input
+                style={styles.input}
+                type="number"
+                value={editPenalty}
+                onChange={(e) => setEditPenalty(e.target.value)}
+              />
+            </div>
+          </div>
+        </Card>
+
         <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <div style={{ flex: 1, marginRight: 8 }}>
-            <p style={styles.label}>Reward ({CURRENCY})</p>
-            <input
-              style={styles.input}
-              type="number"
-              value={editReward}
-              onChange={(e) => setEditReward(e.target.value)}
-            />
-          </div>
-          <div style={{ flex: 1, marginLeft: 8 }}>
-            <p style={styles.label}>Penalty ({CURRENCY})</p>
-            <input
-              style={styles.input}
-              type="number"
-              value={editPenalty}
-              onChange={(e) => setEditPenalty(e.target.value)}
-            />
-          </div>
+          <AppButton
+            title="Save Changes"
+            onClick={handleSaveEdit}
+            style={{ backgroundColor: "#2563eb", flex: 1, marginRight: 8 }}
+          />
+          <AppButton
+            title="Archive Habit"
+            onClick={() => {
+              handleArchive(editHabit.id, true);
+              setEditHabit(null);
+            }}
+            style={{ backgroundColor: "#f59e0b", flex: 1, marginRight: 8 }}
+          />
+          <AppButton
+            title="Delete Habit"
+            onClick={() => handleDelete(editHabit.id)}
+            style={{ backgroundColor: "#ef4444", flex: 1 }}
+          />
         </div>
-        <AppButton
-          title="Save Changes"
-          onClick={handleSaveEdit}
-          style={{ marginTop: 20 }}
-        />
       </CustomModal>
     </div>
   );
@@ -978,6 +1163,7 @@ const CreateHabitScreen = ({ navigate }) => {
       reward: parseFloat(reward),
       penalty: parseFloat(penalty),
       createdOn: new Date().toISOString(),
+      archived: false,
     };
     addHabit(newHabit, creationCost);
     navigate("Habits");
@@ -1294,11 +1480,54 @@ const ReportsScreen = ({ navigate }) => {
           </Card>
         )}
 
-        {barChartData.labels.length > 0 && (
-          <Card>
-            <p style={styles.cardTitle}>Profit/Loss per Habit</p>
-            <CustomBarChart data={barChartData} />
-          </Card>
+        {profitLossPerHabit.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
+            {/* Separate chart for profits */}
+            {profitLossPerHabit.filter((h) => h.total > 0).length > 0 && (
+              <Card>
+                <p style={styles.cardTitle}>Profits per Habit</p>
+                <ProfitLossChart
+                  data={{
+                    labels: profitLossPerHabit
+                      .filter((h) => h.total > 0)
+                      .map((h) => h.name.substring(0, 5)),
+                    datasets: [
+                      {
+                        data: profitLossPerHabit
+                          .filter((h) => h.total > 0)
+                          .map((h) => h.total),
+                      },
+                    ],
+                  }}
+                  title="Profits"
+                  color="#4ade80"
+                />
+              </Card>
+            )}
+
+            {/* Separate chart for losses */}
+            {profitLossPerHabit.filter((h) => h.total < 0).length > 0 && (
+              <Card>
+                <p style={styles.cardTitle}>Losses per Habit</p>
+                <ProfitLossChart
+                  data={{
+                    labels: profitLossPerHabit
+                      .filter((h) => h.total < 0)
+                      .map((h) => h.name.substring(0, 5)),
+                    datasets: [
+                      {
+                        data: profitLossPerHabit
+                          .filter((h) => h.total < 0)
+                          .map((h) => Math.abs(h.total)),
+                      },
+                    ],
+                  }}
+                  title="Losses"
+                  color="#f87171"
+                />
+              </Card>
+            )}
+          </div>
         )}
       </div>
       <CustomModal
@@ -1451,12 +1680,12 @@ const AppContent = () => {
 
         // For each date to process
         for (const dateStr of datesToProcess) {
-          // For each active habit on this date
+          // For each active habit on this date (not archived)
           habits.forEach((habit) => {
             const habitStartDate = new Date(habit.createdOn)
               .toISOString()
               .split("T")[0];
-            if (habitStartDate <= dateStr) {
+            if (habitStartDate <= dateStr && !habit.archived) {
               const loggedOnDate = habitHistory.some(
                 (h) => h.habitId === habit.id && h.date === dateStr
               );
@@ -1484,17 +1713,14 @@ const AppContent = () => {
 
   // This useEffect is responsible for deciding which screen to show after login.
   useEffect(() => {
-    // Only run this logic if loading is complete and we have a logged-in user.
     if (!isLoading && user) {
       if (userProfile && userProfile.focusArea) {
-        // If the user has a focus area, they've completed onboarding.
         setCurrentScreen("Dashboard");
       } else {
-        // Otherwise, send them to onboarding.
         setCurrentScreen("Onboarding");
       }
     }
-  }, [user, isLoading, userProfile]); // This effect runs whenever these values change.
+  }, [user, isLoading, userProfile]);
 
   // Helper functions for navigation within the app.
   const navigate = (screen) => setCurrentScreen(screen);
@@ -1505,7 +1731,10 @@ const AppContent = () => {
   // --- Main Render Logic ---
 
   // 1. Show a loading screen while Firebase is initializing.
+  // 2. While loading, if we have a cached user show Dashboard, otherwise show login
   if (isLoading) {
+    // While loading, show appropriate screen if we have stored data
+    // This prevents login screen flash
     return (
       <div style={styles.container}>
         <p style={styles.title}>Loading...</p>
@@ -1513,7 +1742,7 @@ const AppContent = () => {
     );
   }
 
-  // 2. If loading is done and there's no user, show the Login screen.
+  // If loading is done and there's no user, show the Login screen.
   if (!user) {
     return <LoginScreen />;
   }

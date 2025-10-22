@@ -921,7 +921,11 @@ const HabitsScreen = ({ navigate }) => {
           </p>
         ) : (
           activeHabits.map((habit) => {
-            const profitLoss = calculateHabitProfit(habit.id);
+            const todayStr = new Date().toISOString().split("T")[0];
+            const isLoggedToday = habitHistory.some(
+              (h) => h.habitId === habit.id && h.date === todayStr
+            );
+            // const profitLoss = calculateHabitProfit(habit.id);
             return (
               <Card
                 key={habit.id}
@@ -958,42 +962,45 @@ const HabitsScreen = ({ navigate }) => {
                     borderTop: "1px solid #404040",
                   }}
                 >
-                  <div
-                    style={{
-                      fontSize: 14,
-                      color: profitLoss >= 0 ? "#4ade80" : "#f87171",
-                    }}
-                  >
-                    {profitLoss >= 0 ? "+" : ""}
-                    {profitLoss.toFixed(2)}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 14,
-                      color: profitLoss >= 0 ? "#de4a4aff" : "#f87171",
-                    }}
-                  >
-                    {profitLoss >= 0 ? "-" : ""}
-                    {habit.penalty}
-                  </div>
-                  <div style={styles.trackerActions}>
-                    <button
+                  <div style={{ display: "flex", gap: 12 }}>
+                    <div
                       style={{
-                        ...styles.actionButton,
-                        ...styles.completeButton,
+                        fontSize: 14,
+                        color: "#4ade80",
                       }}
-                      onClick={() => handleAction(habit, "complete")}
-                      disabled={isSaving}
                     >
-                      <span style={styles.actionButtonText}>✓</span>
-                    </button>
-                    <button
-                      style={{ ...styles.actionButton, ...styles.missButton }}
-                      onClick={() => handleAction(habit, "missed")}
+                      + {habit.reward}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 14,
+                        color: "#f87171",
+                      }}
                     >
-                      <span style={styles.actionButtonText}>✕</span>
-                    </button>
+                      - {habit.penalty}
+                    </div>
                   </div>
+
+                  {!isLoggedToday && (
+                    <div style={styles.trackerActions}>
+                      <button
+                        style={{
+                          ...styles.actionButton,
+                          ...styles.completeButton,
+                        }}
+                        onClick={() => handleAction(habit, "complete")}
+                        disabled={isSaving}
+                      >
+                        <span style={styles.actionButtonText}>✓</span>
+                      </button>
+                      <button
+                        style={{ ...styles.actionButton, ...styles.missButton }}
+                        onClick={() => handleAction(habit, "missed")}
+                      >
+                        <span style={styles.actionButtonText}>✕</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </Card>
             );

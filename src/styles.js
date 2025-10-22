@@ -235,8 +235,8 @@ const styles = {
     display: "flex",
   },
   actionButton: {
-    width: 50,
-    height: 50,
+    width: 30,
+    height: 30,
     borderRadius: 25,
     display: "flex",
     justifyContent: "center",
@@ -246,7 +246,7 @@ const styles = {
     cursor: "pointer",
   },
   actionButtonText: {
-    fontSize: 24,
+    fontSize: 18,
     color: "#1c1917",
     fontWeight: "bold",
   },

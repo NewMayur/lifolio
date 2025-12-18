@@ -34,7 +34,7 @@ const WalletProvider = ({ children }) => {
   });
   const [habits, setHabits] = useState([]);
   const [habitHistory, setHabitHistory] = useState([]); // Removed direct loading from AppStorage
-  const [isLoading, setIsLoading] = useState(false); // isLoading is now managed by App component
+  const [isLoading, setIsLoading] = useState(true); // isLoading is now managed by App component
   const [user, setUser] = useState(null); // Track authenticated user
   const [userProfile, setUserProfile] = useState({ focusArea: "" });
   const [apiKey, setApiKey] = useState("");

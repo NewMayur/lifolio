@@ -601,6 +601,22 @@ const DashboardScreen = ({ navigate }) => {
 
   const pieChartData = Object.values(areaDistribution);
 
+  const lossesByArea = safeHabits.reduce((acc, h) => {
+    const area = h?.area || "Uncategorized";
+    const habitLosses = safeHabitHistory.filter(hist => hist.habitId === h.id && hist.change < 0).reduce((sum, hist) => sum + Math.abs(hist.change), 0);
+    if (!acc[area]) {
+      acc[area] = {
+        name: area,
+        count: 0,
+        color: `#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, "0")}`,
+      };
+    }
+    acc[area].count += habitLosses;
+    return acc;
+  }, {});
+
+  const lossesPieData = Object.values(lossesByArea).filter(item => item.count > 0);
+
   const profitLossPerHabit = safeHabits.map((habit) => {
     const historyForHabit = safeHabitHistory.filter(
       (h) => h?.habitId === habit?.id
@@ -733,6 +749,13 @@ const DashboardScreen = ({ navigate }) => {
           <Card style={{ marginBottom: 15 }}>
             <p style={styles.cardTitle}>Habit Area Distribution</p>
             <CustomPieChart data={pieChartData} />
+          </Card>
+        )}
+
+        {lossesPieData.length > 0 && (
+          <Card style={{ marginBottom: 15 }}>
+            <p style={styles.cardTitle}>Losses by Habit Area</p>
+            <CustomPieChart data={lossesPieData} />
           </Card>
         )}
 
